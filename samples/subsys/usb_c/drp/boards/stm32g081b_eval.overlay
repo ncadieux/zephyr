@@ -57,7 +57,8 @@
 			vbus = <&vbus1>;
 			power-role = "dual";
 			typec-power-opmode = "3.0A";
-			source-pdos = <PDO_FIXED(5000, 100, 0) PDO_FIXED(9000, 100, 0)
+			source-pdos = <PDO_FIXED(5000, 100, PDO_FIXED_DUAL_ROLE)
+					   PDO_FIXED(9000, 100, 0)
 				       PDO_FIXED(15000, 100, 0)>;
 			sink-pdos = <PDO_FIXED(5000, 100, 0)>;
 		};

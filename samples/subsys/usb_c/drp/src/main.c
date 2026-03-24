@@ -466,9 +466,11 @@ bool port0_policy_check(const struct device *dev, const enum usbc_policy_check_t
 
 	switch (policy_check) {
 	case CHECK_POWER_ROLE_SWAP_TO_SOURCE:
+		/* Accept power role swap to Source*/
+		return true;
 	case CHECK_POWER_ROLE_SWAP_TO_SINK:
-		/* Reject power role swaps */
-		return false;
+		/* Accept power role swap to Sink */
+		return true;
 	case CHECK_DATA_ROLE_SWAP_TO_DFP:
 		/* Accept data role swap to DFP */
 		return true;
