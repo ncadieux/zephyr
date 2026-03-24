@@ -220,7 +220,45 @@ void tc_attach_wait_snk_exit(void *obj)
 }
 
 /**
- * @brief Attached.SNK Entry
+ * @brief Spec. Release 2.4, section 4.5.2.2.5 Attached.SNK State
+ *
+ * When in the Attached.SNK state, the port is attached and operating as a
+ * Sink. When the port initially enters this state it is also operating as
+ * a UFP. The power and data roles can be changed using USB PD commands.
+ *
+ * Requirements:
+ *  1: If the port needs to determine the orientation of the connector, it
+ *     shall do so only upon entry to this state by detecting which of the
+ *     CC1 or CC2 pins is connected through the cable (i.e., the CC pin
+ *     that is in the SNK.Rp state).
+ *     NOTE: Implemented in tc_attached_snk_entry.
+ *
+ *  2: If the port has entered the Attached.SNK state from the
+ *     AttachWait.SNK or TryWait.SNK states, only one of the CC1 or CC2
+ *     pins will be in the SNK.Rp state. The port shall continue to
+ *     terminate this CC pin to ground through Rd.
+ *     NOTE: Implemented in the super state of AttachWait.SNK.
+ *
+ *  3: If the port has entered the Attached.SNK state from the Attached.SRC
+ *     state following a USB PD PR_Swap, the port shall terminate the
+ *     connected CC pin to ground through Rd.
+ *     NOTE: Implemented in tc_pr_swap_transition.
+ *
+ *  4: The port may negotiate a USB PD PR_Swap, DR_Swap or VCONN_Swap.
+ *     NOTE: Implemented in tc_attached_snk_run.
+ *
+ *  5: By default, upon entry from AttachWait.SNK or Unattached.SNK, VCONN
+ *     shall not be supplied. If Attached.SNK is entered from Attached.SRC
+ *     as a result of a USB PD PR_Swap, it shall maintain VCONN supply
+ *     state, whether on or off, and its data role/connections.
+ *     NOTE: Implemented in tc_attached_snk_entry.
+ *
+ * 10: After a USB PD PR_Swap is accepted (i.e., either an Accept message
+ *     is received or acknowledged), a DRP shall transition directly to the
+ *     Attached.SNK state (i.e., remove Rp from CC, assert Rd on CC and
+ *     stop supplying VBUS) and maintain its current data role, connection
+ *     and VCONN supply state.
+ *     NOTE: Implemented in tc_pr_swap_transition.
  */
 void tc_attached_snk_entry(void *obj)
 {
@@ -231,6 +269,20 @@ void tc_attached_snk_entry(void *obj)
 	int ret;
 
 	LOG_INF("Attached.SNK");
+
+	if (IS_ENABLED(CONFIG_USBC_CSM_DRP) &&
+	    atomic_test_and_clear_bit(&tc->flags, TC_FLAGS_PRS_TRANSITION)) {
+		/* Entering as new Sink after PRS.
+		 * PE asserted Rd and the partner is now sourcing VBUS.
+		 * Re-enable the TCPC and PPC sink paths disabled in PE_PRS_TRANSITION_TO_OFF.
+		 */
+		tc->cc_voltage = TC_CC_VOLT_OPEN;
+		tcpc_set_snk_ctrl(tcpc, true);
+		if (data->ppc != NULL) {
+			ppc_set_snk_ctrl(data->ppc, true);
+		}
+		return;
+	}
 
 	/* Clear cached CC voltage */
 	tc->cc_voltage = TC_CC_VOLT_OPEN;
@@ -265,8 +317,9 @@ enum smf_state_result tc_attached_snk_run(void *obj)
 	struct usbc_port_data *data = dev->data;
 	const struct device *vbus = data->vbus;
 
-	/* Detach detection */
-	if (usbc_vbus_check_level(vbus, TC_VBUS_REMOVED)) {
+	/* Detach detection, suppressed during Power Role Swap */
+	if (!atomic_test_bit(&tc->flags, TC_FLAGS_PR_SWAP) &&
+	    usbc_vbus_check_level(vbus, TC_VBUS_REMOVED)) {
 		usbc_vbus_enable(vbus, false);
 		tc_set_state(dev, TC_UNATTACHED_SNK_STATE);
 		return SMF_EVENT_PROPAGATE;
@@ -288,6 +341,14 @@ void tc_attached_snk_exit(void *obj)
 	const struct device *dev = tc->dev;
 	struct usbc_port_data *data = dev->data;
 	int ret;
+
+	if (IS_ENABLED(CONFIG_USBC_CSM_DRP)) {
+		atomic_clear_bit(&tc->flags, TC_FLAGS_PR_SWAP);
+		if (atomic_test_bit(&tc->flags, TC_FLAGS_PRS_TRANSITION)) {
+			/* Power Role Swap transition from Attached.SNK to Attached.SRC */
+			return;
+		}
+	}
 
 	/* Disable PD */
 	tc_pd_enable(dev, false);

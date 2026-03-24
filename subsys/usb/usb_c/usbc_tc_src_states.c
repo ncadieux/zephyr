@@ -213,40 +213,53 @@ void tc_attach_wait_src_exit(void *obj)
 }
 
 /**
- * @brief Spec. Release 1.3, section 4.5.2.2.9 Attached.SRC State
+ * @brief Spec. Release 2.4, section 4.5.2.2.9 Attached.SRC State
  *
  * When in the Attached.SRC state, the port is attached and operating as a
- * Source. When the port initially enters this state it is also operating
+ * Source. When the port initially enters this state, it is also operating
  * as a DFP. Subsequently, the initial power and data roles can be changed
  * using USB PD commands.
  *
  * Requirements:
  *  1: If the port needs to determine the orientation of the connector, it
  *     shall do so only upon entry to the Attached.SRC state by detecting
- *     which of the CC1 or CC2 pins is connected through the
- *     cable, i.e., which CC pin is in the SRC.Rd state.
+ *     which of the CC1 or CC2 pins is connected through the cable, i.e.,
+ *     which CC pin is in the SRC.Rd state.
  *     NOTE: Implemented in tc_attached_src_entry.
  *
- * 2: If the port has entered this state from the AttachWait.SRC state,
- *    the SRC.Rd state will be on only one of the CC1 or CC2 pins. The
- *    port shall source current on this CC pin and monitor its state.
- *    NOTE: Implemented in the super state of AttachWait.SRC.
+ *  2: If the port has entered this state from the AttachWait.SRC state or
+ *     the Try.SRC state, the SRC.Rd state will be on only one of the CC1
+ *     or CC2 pins. The port shall source current on this CC pin and
+ *     monitor its state.
+ *     NOTE: Implemented in the super state of AttachWait.SRC.
  *
- * 3: The port shall provide an Rp
- *    NOTE: Implemented in the super state of AttachWait.SRC.
+ *  3: If the port has entered this state from the Attached.SNK state as
+ *     the result of a USB PD PR_Swap, the port shall source current on
+ *     the connected CC pin and monitor its state.
+ *     NOTE: Implemented in tc_pr_swap_transition.
  *
- * 5: The port shall supply VBUS current at the level it advertises on Rp.
- *    NOTE: Implemented in tc_attached_src_entry.
+ *  4: The port shall provide an Rp as specified in Table 4-27.
+ *     NOTE: Implemented in the super state of AttachWait.SRC.
  *
- * 7: The port shall not initiate any USB PD communications until VBUS
- *    reaches vSafe5V.
- *    NOTE: Implemented in tc_attached_src_run.
+ *  5: The port shall supply VBUS current at the level it advertises on Rp.
+ *     NOTE: Implemented in tc_attached_src_entry.
  *
- * 8: The port may negotiate a USB PD PR_Swap, DR_Swap or VCONN_Swap.
- *    NOTE: Implemented in tc_attached_src_run.
+ *  7: The port shall not initiate any USB PD communications until VBUS
+ *     reaches vSafe5V.
+ *     NOTE: Implemented in tc_attached_src_run.
  *
- * 9: If the port supplies VCONN, it shall do so within t_VCONN_ON.
- *    NOTE: Implemented in tc_attached_src_entry.
+ *  8: The port may negotiate a USB PD PR_Swap, DR_Swap or VCONN_Swap.
+ *     NOTE: Implemented in tc_attached_src_run.
+ *
+ *  9: If the port supplies VCONN, it shall do so within tVCONNON.
+ *     NOTE: Implemented in tc_attached_src_entry.
+ *
+ * 10: After receiving a USB PD PS_RDY from the original Source during a
+ *     USB PD PR_Swap, the port shall transition directly to the
+ *     Attached.SRC state (i.e., remove Rd from CC, assert Rp on CC and
+ *     supply VBUS), but shall maintain its VCONN supply state, whether
+ *     off or on, and its data role/connections.
+ *     NOTE: Implemented in tc_pr_swap_transition.
  */
 
 void tc_attached_src_entry(void *obj)
@@ -258,6 +271,15 @@ void tc_attached_src_entry(void *obj)
 	int ret;
 
 	LOG_INF("Attached.SRC");
+
+	if (IS_ENABLED(CONFIG_USBC_CSM_DRP) &&
+	    atomic_test_and_clear_bit(&tc->flags, TC_FLAGS_PRS_TRANSITION)) {
+		/* Entering as new Source after PRS.
+		 * PE already: set TCPC roles (tcpc_set_roles), asserted Rp (tcpc_set_cc),
+		 * enabled VBUS (usbc_policy_src_en + ppc_set_src_ctrl).
+		 */
+		return;
+	}
 
 	/* Initial data role for source is DFP */
 	tcpc_set_roles(tcpc, TC_ROLE_SOURCE, TC_ROLE_DFP);
@@ -301,8 +323,8 @@ enum smf_state_result tc_attached_src_run(void *obj)
 	struct tc_sm_t *tc = (struct tc_sm_t *)obj;
 	const struct device *dev = tc->dev;
 
-	/* Monitor for CC disconnection */
-	if (tcpc_is_cc_open(tc->cc1, tc->cc2)) {
+	/* Monitor for CC disconnection, suppressed during Power Role Swap */
+	if (!atomic_test_bit(&tc->flags, TC_FLAGS_PR_SWAP) && tcpc_is_cc_open(tc->cc1, tc->cc2)) {
 		/*
 		 * A Source that is supplying VCONN or has yielded VCONN source
 		 * responsibility to the Sink through USBPD VCONN_Swap messaging
@@ -336,6 +358,14 @@ void tc_attached_src_exit(void *obj)
 	struct usbc_port_data *data = dev->data;
 	const struct device *tcpc = data->tcpc;
 	int ret;
+
+	if (IS_ENABLED(CONFIG_USBC_CSM_DRP)) {
+		atomic_clear_bit(&tc->flags, TC_FLAGS_PR_SWAP);
+		if (atomic_test_bit(&tc->flags, TC_FLAGS_PRS_TRANSITION)) {
+			/* Power Role Swap transition from Attached.SRC to Attached.SNK */
+			return;
+		}
+	}
 
 	/* Disable PD */
 	tc_pd_enable(dev, false);

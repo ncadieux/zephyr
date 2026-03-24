@@ -24,6 +24,10 @@ enum tc_flags {
 	TC_FLAGS_RP_SUBSTATE_CHANGE = 0,
 	/** Tracks if VCONN is ON or OFF */
 	TC_FLAGS_VCONN_ON,
+	/** Set during a Power Role Swap to suppress false disconnect detection */
+	TC_FLAGS_PR_SWAP,
+	/** Set while TC is transitioning attached states due to a completed Power Role Swap */
+	TC_FLAGS_PRS_TRANSITION,
 };
 
 /**
@@ -162,5 +166,27 @@ bool tc_is_in_attached_state(const struct device *dev);
  * @param rp Collision Avoidance Rp to set
  */
 void tc_select_src_collision_rp(const struct device *dev, enum tc_rp_value rp);
+
+#ifdef CONFIG_USBC_CSM_DRP
+/**
+ * @brief Lock the TC attached state during a Power Role Swap.
+ *        Suppresses CC-open and VBUS-absent disconnect detection while
+ *        the PE is actively swapping CC resistors and VBUS.
+ *
+ * @param dev Pointer to the device structure for the driver instance.
+ */
+void tc_pr_swap_start(const struct device *dev);
+
+/**
+ * @brief Transition the TC attached state after a Power Role Swap completes.
+ *        Sets a flag to suppress hardware re-initialization in the entry/exit
+ *        functions, clears the PR_Swap disconnect-detection lock, and schedules
+ *        the TC SM to enter the new attached state.
+ *
+ * @param dev       Pointer to the device structure for the driver instance.
+ * @param new_state TC_ATTACHED_SRC_STATE or TC_ATTACHED_SNK_STATE
+ */
+void tc_pr_swap_transition(const struct device *dev, enum tc_state_t new_state);
+#endif /* CONFIG_USBC_CSM_DRP */
 
 #endif /* ZEPHYR_SUBSYS_USBC_TC_COMMON_INTERNAL_H_ */

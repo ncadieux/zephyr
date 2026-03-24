@@ -251,6 +251,35 @@ void tc_select_src_collision_rp(const struct device *dev, enum tc_rp_value rp)
 	}
 }
 
+#ifdef CONFIG_USBC_CSM_DRP
+/**
+ * @brief Lock the TC attached state during a Power Role Swap.
+ *        Suppresses CC-open and VBUS-absent disconnect detection while
+ *        the PE is actively swapping CC resistors and VBUS.
+ */
+void tc_pr_swap_start(const struct device *dev)
+{
+	struct usbc_port_data *data = dev->data;
+
+	atomic_set_bit(&data->tc->flags, TC_FLAGS_PR_SWAP);
+}
+
+/**
+ * @brief Transition the TC attached state after a Power Role Swap completes.
+ *        Sets a flag to suppress hardware re-initialization in the entry/exit
+ *        functions, clears the PR_Swap disconnect-detection lock, and schedules
+ *        the TC SM to enter the new attached state.
+ */
+void tc_pr_swap_transition(const struct device *dev, enum tc_state_t new_state)
+{
+	struct usbc_port_data *data = dev->data;
+
+	atomic_set_bit(&data->tc->flags, TC_FLAGS_PRS_TRANSITION);
+	atomic_clear_bit(&data->tc->flags, TC_FLAGS_PR_SWAP);
+	tc_set_state(dev, new_state);
+}
+#endif /* CONFIG_USBC_CSM_DRP */
+
 /**
  * @brief CC Open Entry
  */
