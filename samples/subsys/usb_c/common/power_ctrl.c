@@ -34,29 +34,38 @@ struct power_ctrl_config {
 int vconn_ctrl_set(const struct device *dev, enum vconn_t v)
 {
 	const struct power_ctrl_config *cfg = dev->config;
+	int ret;
 
 	switch (v) {
 	case VCONN_OFF:
-		gpio_pin_set_dt(&cfg->vconn1_en, 0);
-		gpio_pin_set_dt(&cfg->vconn2_en, 0);
+		ret = gpio_pin_set_dt(&cfg->vconn1_en, 0);
+		ret |= gpio_pin_set_dt(&cfg->vconn2_en, 0);
 		break;
 	case VCONN1_ON:
-		gpio_pin_set_dt(&cfg->vconn1_en, 1);
-		gpio_pin_set_dt(&cfg->vconn2_en, 0);
+		ret = gpio_pin_set_dt(&cfg->vconn1_en, 1);
+		ret |= gpio_pin_set_dt(&cfg->vconn2_en, 0);
 		break;
 	case VCONN2_ON:
-		gpio_pin_set_dt(&cfg->vconn1_en, 0);
-		gpio_pin_set_dt(&cfg->vconn2_en, 1);
+		ret = gpio_pin_set_dt(&cfg->vconn1_en, 0);
+		ret |= gpio_pin_set_dt(&cfg->vconn2_en, 1);
 		break;
+	default:
+		LOG_ERR("Error: invalid VCONN state %d requested on device %s", v, dev->name);
+		return -EINVAL;
 	}
 
-	return 0;
+	if (ret != 0) {
+		LOG_ERR("Error %d: failed to set VCONN state %d on device %s", ret, v, dev->name);
+	}
+
+	return ret;
 }
 
 int source_ctrl_set(const struct device *dev, enum source_t v)
 {
 	const struct power_ctrl_config *cfg = dev->config;
 	uint32_t pwmv;
+	int ret;
 
 	switch (v) {
 	case SOURCE_0V:
@@ -72,10 +81,53 @@ int source_ctrl_set(const struct device *dev, enum source_t v)
 		pwmv = PWM_FOR_15V;
 		break;
 	default:
-		pwmv = PWM_FOR_0V;
+		LOG_ERR("Error: invalid source voltage %d requested on device %s", v, dev->name);
+		return -EINVAL;
 	}
 
-	return pwm_set_pulse_dt(&cfg->pwm_ctl, pwmv);
+	if (v == SOURCE_0V) {
+		/* Disable Vbus: Disable source and DC-DC, then configure Vbus voltage */
+		ret = gpio_pin_set_dt(&cfg->source_en, 0);
+		if (ret != 0) {
+			LOG_ERR("Error %d: failed to disable source on device %s", ret, dev->name);
+			return ret;
+		}
+
+		ret = gpio_pin_set_dt(&cfg->dcdc_en, 0);
+		if (ret != 0) {
+			LOG_ERR("Error %d: failed to disable dcdc converter on device %s", ret,
+				dev->name);
+			return ret;
+		}
+
+		ret = pwm_set_pulse_dt(&cfg->pwm_ctl, pwmv);
+		if (ret != 0) {
+			LOG_ERR("Error %d: failed to set VBUS pulse on device %s", ret, dev->name);
+			return ret;
+		}
+	} else {
+		/* Enable Vbus: Enable DC-DC, configure Vbus voltage, then enable source */
+		ret = gpio_pin_set_dt(&cfg->dcdc_en, 1);
+		if (ret != 0) {
+			LOG_ERR("Error %d: failed to enable dcdc converter on device %s", ret,
+				dev->name);
+			return ret;
+		}
+
+		ret = pwm_set_pulse_dt(&cfg->pwm_ctl, pwmv);
+		if (ret != 0) {
+			LOG_ERR("Error %d: failed to set VBUS pulse on device %s", ret, dev->name);
+			return ret;
+		}
+
+		ret = gpio_pin_set_dt(&cfg->source_en, 1);
+		if (ret != 0) {
+			LOG_ERR("Error %d: failed to enable source on device %s", ret, dev->name);
+			return ret;
+		}
+	}
+
+	return 0;
 }
 
 static int power_ctrl_init(const struct device *dev)
@@ -136,20 +188,14 @@ static int power_ctrl_init(const struct device *dev)
 		return ret;
 	}
 
-	ret = gpio_pin_set_dt(&cfg->source_en, 1);
+	/* Disable Vconn */
+	ret = vconn_ctrl_set(dev, VCONN_OFF);
 	if (ret != 0) {
-		LOG_ERR("Error %d: failed to enable source", ret);
+		LOG_ERR("Error %d: failed to disable VCONN on device %s", ret, dev->name);
 		return ret;
 	}
 
-	ret = gpio_pin_set_dt(&cfg->dcdc_en, 1);
-	if (ret != 0) {
-		LOG_ERR("Error %d: failed to enable dcdc converter", ret);
-		return ret;
-	}
-
-	vconn_ctrl_set(dev, VCONN_OFF);
-
+	/* Disable Vbus */
 	ret = source_ctrl_set(dev, SOURCE_0V);
 	if (ret != 0) {
 		LOG_ERR("Error %d: failed to set VBUS to 0V", ret);
