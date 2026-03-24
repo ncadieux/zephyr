@@ -33,4 +33,5 @@ zephyr_library_sources_ifdef(
   usbc_pe_snk_states.c
   usbc_tc_src_states.c
   usbc_pe_src_states.c
+  usbc_pe_prs_states.c
 )

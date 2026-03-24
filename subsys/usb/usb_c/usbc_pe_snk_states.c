@@ -72,8 +72,14 @@ void pe_snk_startup_entry(void *obj)
 
 	LOG_INF("PE_SNK_Startup");
 
-	/* Reset the protocol layer */
+	/* Reset the protocol layer, unless transitioning from a Power Role Swap */
+#ifdef CONFIG_USBC_CSM_DRP
+	if (pe_get_last_state(dev) != PE_PRS_WAIT_SOURCE_ON) {
+		prl_reset(dev);
+	}
+#else
 	prl_reset(dev);
+#endif /* CONFIG_USBC_CSM_DRP */
 
 	/* Set power role to Sink */
 	pe->power_role = TC_ROLE_SINK;
@@ -267,6 +273,8 @@ enum smf_state_result pe_snk_select_capability_run(void *obj)
 		 * 1) SE_SNK_EVALUATE_CAPABILITY: sends SoftReset
 		 * 2) SE_SNK_READY: goes back to SNK Ready
 		 */
+		LOG_INF("PE_SNK_Select_Capability: MSG_DISCARDED (last_state=%d)",
+			pe_get_last_state(dev));
 		if (pe_get_last_state(dev) == PE_SNK_EVALUATE_CAPABILITY) {
 			pe_send_soft_reset(dev, PD_PACKET_SOP);
 		} else {
@@ -480,6 +488,13 @@ enum smf_state_result pe_snk_ready_run(void *obj)
 			case PD_CTRL_DR_SWAP:
 				pe_set_state(dev, PE_DRS_EVALUATE_SWAP);
 				return SMF_EVENT_PROPAGATE;
+			case PD_CTRL_PR_SWAP:
+#ifdef CONFIG_USBC_CSM_DRP
+				pe_set_state(dev, PE_PRS_EVALUATE_SWAP);
+#else
+				pe_set_state(dev, PE_SEND_NOT_SUPPORTED);
+#endif
+				break;
 			case PD_CTRL_NOT_SUPPORTED:
 				/* Do nothing */
 				break;
@@ -515,12 +530,15 @@ enum smf_state_result pe_snk_ready_run(void *obj)
 		} else if (atomic_test_and_clear_bit(pe->flags, PE_FLAGS_WAIT_DATA_ROLE_SWAP)) {
 			pe_set_state(dev, PE_DRS_SEND_SWAP);
 			return SMF_EVENT_PROPAGATE;
+#ifdef CONFIG_USBC_CSM_DRP
+		} else if (atomic_test_and_clear_bit(pe->flags, PE_FLAGS_WAIT_POWER_ROLE_SWAP)) {
+			pe_set_state(dev, PE_PRS_SEND_SWAP);
+			return SMF_EVENT_PROPAGATE;
+#endif
 		}
 	}
 
-	/*
-	 * Handle Device Policy Manager Requests
-	 */
+	/* Handle Sink DPM Requests */
 	sink_dpm_requests(dev);
 	return SMF_EVENT_PROPAGATE;
 }

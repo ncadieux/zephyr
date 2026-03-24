@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2022 The Chromium OS Authors
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,6 +24,14 @@ enum sm_msg_xmit {
 	SM_WAIT_FOR_TX,
 	/* Wait for a message reception sub-machine state */
 	SM_WAIT_FOR_RX,
+};
+
+/**
+ * @brief Used in sub-machines for source power supply operation
+ */
+enum sm_pwr {
+	/* Wait for power supply to become ready (e.g. VBUS reaching target level) */
+	SM_WAIT_FOR_PS_RDY,
 };
 
 /**
@@ -108,6 +117,20 @@ enum usbc_pe_state {
 	PE_DRS_SEND_SWAP,
 	/** PE_Get_Sink_Cap */
 	PE_GET_SINK_CAP,
+#ifdef CONFIG_USBC_CSM_DRP
+	/** PE_PRS_Send_Swap */
+	PE_PRS_SEND_SWAP,
+	/** PE_PRS_Evaluate_Swap */
+	PE_PRS_EVALUATE_SWAP,
+	/** PE_PRS_Transition_to_off */
+	PE_PRS_TRANSITION_TO_OFF,
+	/** PE_PRS_Assert_CC */
+	PE_PRS_ASSERT_CC,
+	/** PE_PRS_Source_on (SNK->SRC direction only) */
+	PE_PRS_SOURCE_ON,
+	/** PE_PRS_Wait_Source_on (SRC->SNK direction only) */
+	PE_PRS_WAIT_SOURCE_ON,
+#endif /* CONFIG_USBC_CSM_DRP */
 
 	/** PE_Suspend. Not part of the PD specification. */
 	PE_SUSPEND,
@@ -186,6 +209,13 @@ enum pe_flags {
 	PE_FLAGS_PROTOCOL_ERROR_NO_SOFT_RESET = 17,
 	/* This flag is set when the first AMS message is sent */
 	PE_FLAGS_FIRST_MSG_SENT = 18,
+#ifdef CONFIG_USBC_CSM_DRP
+	/**
+	 * This flag is set when a Wait message is received in response to a
+	 * Power Role Swap
+	 */
+	PE_FLAGS_WAIT_POWER_ROLE_SWAP = 19,
+#endif
 	/** Number of PE Flags */
 	PE_FLAGS_COUNT
 };
@@ -261,6 +291,12 @@ struct policy_engine {
 	/** tPSHardReset timer */
 	struct usbc_timer_t pd_t_ps_hard_reset;
 #endif
+#ifdef CONFIG_USBC_CSM_DRP
+	/** tPSSourceOff timer */
+	struct usbc_timer_t pd_t_source_off;
+	/** tPSSourceOn timer */
+	struct usbc_timer_t pd_t_source_on;
+#endif
 };
 
 /**
@@ -309,9 +345,8 @@ void pe_send_soft_reset(const struct device *dev, const enum pd_packet_type type
  * @param type SOP* to send message
  * @param msg PD data message to send
  */
-void pe_send_data_msg(const struct device *dev,
-		   const enum pd_packet_type type,
-		   const enum pd_data_msg_type msg);
+void pe_send_data_msg(const struct device *dev, const enum pd_packet_type type,
+		      const enum pd_data_msg_type msg);
 
 /**
  * @brief Send a Power Delivery Control Message
@@ -320,9 +355,8 @@ void pe_send_data_msg(const struct device *dev,
  * @param type SOP* to send message
  * @param msg PD control message to send
  */
-void pe_send_ctrl_msg(const struct device *dev,
-		   const enum pd_packet_type type,
-		   const enum pd_ctrl_msg_type msg);
+void pe_send_ctrl_msg(const struct device *dev, const enum pd_packet_type type,
+		      const enum pd_ctrl_msg_type msg);
 
 /**
  * @brief Request desired voltage from source.
@@ -400,7 +434,7 @@ void policy_set_src_cap(const struct device *dev, const uint32_t *pdos, const in
  * @brief Check if the sink request can be met by the DPM
  */
 enum usbc_snk_req_reply_t policy_check_sink_request(const struct device *dev,
-						const uint32_t request_msg);
+						    const uint32_t request_msg);
 
 /**
  * @brief Check if the Present Contract is still valid.
@@ -622,5 +656,13 @@ enum tc_power_role pe_get_power_role(const struct device *dev);
  * @retval cable plug role
  */
 enum tc_cable_plug pe_get_cable_plug(const struct device *dev);
+
+/**
+ * @brief Transition the Policy Engine to the Ready state
+ *        (PE_SRC_Ready or PE_SNK_Ready depending on power role)
+ *
+ * @param dev Pointer to the device structure for the driver instance
+ */
+void pe_set_ready_state(const struct device *dev);
 
 #endif /* ZEPHYR_SUBSYS_USBC_PE_COMMON_INTERNAL_H_ */

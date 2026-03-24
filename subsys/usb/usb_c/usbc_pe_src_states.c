@@ -101,8 +101,14 @@ void pe_src_startup_entry(void *obj)
 	/* Reset CapsCounter */
 	pe->caps_counter = 0;
 
-	/* Reset the protocol layer */
+	/* Reset the protocol layer, unless transitioning from a Power Role Swap */
+#ifdef CONFIG_USBC_CSM_DRP
+	if (pe_get_last_state(dev) != PE_PRS_SOURCE_ON) {
+		prl_reset(dev);
+	}
+#else
 	prl_reset(dev);
+#endif /* CONFIG_USBC_CSM_DRP */
 
 	/* Set power role to Source */
 	pe->power_role = TC_ROLE_SOURCE;
@@ -465,6 +471,13 @@ enum smf_state_result pe_src_ready_run(void *obj)
 			case PD_CTRL_DR_SWAP:
 				pe_set_state(dev, PE_DRS_EVALUATE_SWAP);
 				break;
+			case PD_CTRL_PR_SWAP:
+#ifdef CONFIG_USBC_CSM_DRP
+				pe_set_state(dev, PE_PRS_EVALUATE_SWAP);
+#else
+				pe_set_state(dev, PE_SEND_NOT_SUPPORTED);
+#endif
+				break;
 			/*
 			 * USB PD 3.0 6.8.1:
 			 * Receiving an unexpected message shall be responded
@@ -486,10 +499,24 @@ enum smf_state_result pe_src_ready_run(void *obj)
 				break;
 			}
 		}
-	} else {
-		/* Handle Source DPManager Requests */
-		source_dpm_requests(dev);
 	}
+	/*
+	 * Check if we are waiting to resend any messages
+	 */
+	if (usbc_timer_expired(&pe->pd_t_wait_to_resend)) {
+		if (atomic_test_and_clear_bit(pe->flags, PE_FLAGS_WAIT_DATA_ROLE_SWAP)) {
+			pe_set_state(dev, PE_DRS_SEND_SWAP);
+			return SMF_EVENT_PROPAGATE;
+#ifdef CONFIG_USBC_CSM_DRP
+		} else if (atomic_test_and_clear_bit(pe->flags, PE_FLAGS_WAIT_POWER_ROLE_SWAP)) {
+			pe_set_state(dev, PE_PRS_SEND_SWAP);
+			return SMF_EVENT_PROPAGATE;
+#endif
+		}
+	}
+
+	/* Handle Source DPM Requests */
+	source_dpm_requests(dev);
 	return SMF_EVENT_PROPAGATE;
 }
 

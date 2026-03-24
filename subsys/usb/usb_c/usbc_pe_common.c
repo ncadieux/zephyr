@@ -17,6 +17,9 @@ LOG_MODULE_DECLARE(usbc_stack, CONFIG_USBC_STACK_LOG_LEVEL);
 #include "usbc_pe_common_internal.h"
 #include "usbc_pe_snk_states_internal.h"
 #include "usbc_pe_src_states_internal.h"
+#ifdef CONFIG_USBC_CSM_DRP
+#include "usbc_pe_prs_states_internal.h"
+#endif
 #include "usbc_config.h"
 
 static const struct smf_state pe_states[PE_STATE_COUNT];
@@ -24,7 +27,7 @@ static const struct smf_state pe_states[PE_STATE_COUNT];
 /**
  * @brief Set the ready state for sink or source.
  */
-static void pe_set_ready_state(const struct device *dev)
+void pe_set_ready_state(const struct device *dev)
 {
 	struct usbc_port_data *data = dev->data;
 
@@ -54,6 +57,11 @@ bool common_dpm_requests(const struct device *dev)
 		} else if (pe->dpm_request == REQUEST_PE_SOFT_RESET_SEND) {
 			pe_set_state(dev, PE_SEND_SOFT_RESET);
 			return true;
+#ifdef CONFIG_USBC_CSM_DRP
+		} else if (pe->dpm_request == REQUEST_PE_PR_SWAP) {
+			pe_set_state(dev, PE_PRS_SEND_SWAP);
+			return true;
+#endif /* CONFIG_USBC_CSM_DRP */
 		}
 	}
 
@@ -115,6 +123,10 @@ static void pe_init(const struct device *dev)
 	/* Initialize common timers */
 	usbc_timer_init(&pe->pd_t_sender_response, PD_T_NO_RESPONSE_MAX_MS);
 	usbc_timer_init(&pe->pd_t_chunking_not_supported, PD_T_CHUNKING_NOT_SUPPORTED_NOM_MS);
+#ifdef CONFIG_USBC_CSM_DRP
+	usbc_timer_init(&pe->pd_t_source_off, PD_T_PS_SOURCE_OFF_SPR_MAX_MS);
+	usbc_timer_init(&pe->pd_t_source_on, PD_T_PS_SOURCE_ON_SPR_MAX_MS);
+#endif
 
 	/* Initialize common counters */
 	pe->hard_reset_counter = 0;
@@ -1066,7 +1078,8 @@ static void pe_send_soft_reset_entry(void *obj)
 }
 
 /**
- * @brief PE_Send_Soft_Reset Run State
+ * @brief PE_Send_Soft_Reset Run state
+ *	  NOTE: Sender Response Timer is handled in super state.
  */
 static enum smf_state_result pe_send_soft_reset_run(void *obj)
 {
@@ -1262,7 +1275,11 @@ static enum smf_state_result pe_sender_response_run(void *obj)
 		case PE_DRS_SEND_SWAP:
 			pe_set_ready_state(dev);
 			break;
-
+#ifdef CONFIG_USBC_CSM_DRP
+		case PE_PRS_SEND_SWAP:
+			pe_set_ready_state(dev);
+			break;
+#endif
 		/* This should not happen. Implementation error */
 		default:
 			LOG_INF("Unhandled Sender Response Timeout State!");
@@ -1471,6 +1488,44 @@ static const struct smf_state pe_states[PE_STATE_COUNT] = {
 		NULL,
 		&pe_states[PE_SENDER_RESPONSE_PARENT],
 		NULL),
+#ifdef CONFIG_USBC_CSM_DRP
+	[PE_PRS_EVALUATE_SWAP] = SMF_CREATE_STATE(
+		pe_prs_evaluate_swap_entry,
+		pe_prs_evaluate_swap_run,
+		NULL,
+		NULL,
+		NULL),
+	[PE_PRS_SEND_SWAP] = SMF_CREATE_STATE(
+		pe_prs_send_swap_entry,
+		pe_prs_send_swap_run,
+		NULL,
+		&pe_states[PE_SENDER_RESPONSE_PARENT],
+		NULL),
+	[PE_PRS_TRANSITION_TO_OFF] = SMF_CREATE_STATE(
+		pe_prs_transition_to_off_entry,
+		pe_prs_transition_to_off_run,
+		NULL,
+		NULL,
+		NULL),
+	[PE_PRS_ASSERT_CC] = SMF_CREATE_STATE(
+		pe_prs_assert_cc_entry,
+		pe_prs_assert_cc_run,
+		NULL,
+		NULL,
+		NULL),
+	[PE_PRS_SOURCE_ON] = SMF_CREATE_STATE(
+		pe_prs_source_on_entry,
+		pe_prs_source_on_run,
+		NULL,
+		NULL,
+		NULL),
+	[PE_PRS_WAIT_SOURCE_ON] = SMF_CREATE_STATE(
+		pe_prs_wait_source_on_entry,
+		pe_prs_wait_source_on_run,
+		NULL,
+		NULL,
+		NULL),
+#endif /* CONFIG_USBC_CSM_DRP */
 	[PE_CHUNK_RECEIVED] = SMF_CREATE_STATE(
 		pe_chunk_received_entry,
 		pe_chunk_received_run,
