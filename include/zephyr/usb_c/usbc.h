@@ -136,8 +136,10 @@ enum usbc_policy_notify_t {
  * @brief Device Policy Manager checks
  */
 enum usbc_policy_check_t {
-	/** Check if Power Role Swap is allowed */
-	CHECK_POWER_ROLE_SWAP,
+	/** Check if Power Role Swap to Source is allowed */
+	CHECK_POWER_ROLE_SWAP_TO_SOURCE,
+	/** Check if Power Role Swap to Sink is allowed */
+	CHECK_POWER_ROLE_SWAP_TO_SINK,
 	/** Check if Data Role Swap to DFP is allowed */
 	CHECK_DATA_ROLE_SWAP_TO_DFP,
 	/** Check if Data Role Swap to UFP is allowed */
@@ -289,7 +291,7 @@ typedef bool (*policy_cb_is_ps_ready_t)(const struct device *dev);
  * @return true if present contract is still valid
  */
 typedef bool (*policy_cb_present_contract_is_valid_t)(const struct device *dev,
-						   const uint32_t present_contract);
+						      const uint32_t present_contract);
 
 /**
  * @brief Callback type used to request that a different set of Source Caps
@@ -516,7 +518,7 @@ void usbc_set_policy_cb_is_ps_ready(const struct device *dev,
  * @param cb callback
  */
 void usbc_set_policy_cb_present_contract_is_valid(const struct device *dev,
-					       const policy_cb_present_contract_is_valid_t cb);
+						  const policy_cb_present_contract_is_valid_t cb);
 
 /**
  * @brief Set the callback used to request that a different set of Source Caps

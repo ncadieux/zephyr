@@ -250,7 +250,8 @@ static void port0_notify(const struct device *dev, const enum usbc_policy_notify
 bool port0_policy_check(const struct device *dev, const enum usbc_policy_check_t policy_check)
 {
 	switch (policy_check) {
-	case CHECK_POWER_ROLE_SWAP:
+	case CHECK_POWER_ROLE_SWAP_TO_SOURCE:
+	case CHECK_POWER_ROLE_SWAP_TO_SINK:
 		/* Reject power role swaps */
 		return false;
 	case CHECK_DATA_ROLE_SWAP_TO_DFP:
