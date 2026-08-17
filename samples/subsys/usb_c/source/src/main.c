@@ -8,6 +8,7 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/usb_c/usbc.h>
+#include <zephyr/drivers/usb_c/usbc_vbus.h>
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
@@ -23,6 +24,12 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
 BUILD_ASSERT(DT_ENUM_IDX(USBC_PORT0_NODE, power_role) == TC_ROLE_CAP_SOURCE,
 	     "Unsupported board: Only Source device supported");
+
+/* Flag bits for power supply state management */
+#define PS_SOURCE_REQUEST_BIT          0 /* Source: Display sink request */
+#define PS_SOURCE_TRAN_START_BIT       1 /* Source: Start voltage transition */
+#define PS_SOURCE_TRAN_IN_PROGRESS_BIT 2 /* Source: Voltage transition in progress */
+#define PS_SOURCE_READY_BIT            3 /* Source: Voltage transition complete */
 
 /* usbc.rst port data object start */
 /**
@@ -43,12 +50,10 @@ static struct port0_data_t {
 	int obj_pos;
 	/** VCONN CC line*/
 	enum tc_cc_polarity vconn_pol;
-	/** True if power supply is ready */
-	bool ps_ready;
-	/** True if power supply should transition to a new level */
-	bool ps_tran_start;
-	/** Log Sink Requested RDO to console */
-	atomic_t show_sink_request;
+	/** VBUS measurement device */
+	const struct device *vbus;
+	/** Atomic ps_flags for power supply state management */
+	atomic_t ps_flags;
 } port0_data = {
 	.rp = DT_ENUM_IDX(USBC_PORT0_NODE, typec_power_opmode),
 	.src_caps = DT_PROP(USBC_PORT0_NODE, source_pdos),
@@ -104,7 +109,9 @@ int port0_policy_cb_src_en(const struct device *dev, bool en)
 {
 	struct port0_data_t *dpm_data = usbc_get_dpm_data(dev);
 
-	source_ctrl_set(dpm_data->pwrctrl, en ? SOURCE_5V : SOURCE_0V);
+	dpm_data->obj_pos = en ? SOURCE_5V : SOURCE_0V;
+	atomic_clear_bit(&dpm_data->ps_flags, PS_SOURCE_READY_BIT);
+	atomic_set_bit(&dpm_data->ps_flags, PS_SOURCE_TRAN_START_BIT);
 
 	return 0;
 }
@@ -176,13 +183,13 @@ static enum usbc_snk_req_reply_t port0_policy_cb_check_sink_request(const struct
 
 	dpm_data->obj_pos = obj_pos;
 
-	atomic_set_bit(&port0_data.show_sink_request, 0);
+	atomic_set_bit(&dpm_data->ps_flags, PS_SOURCE_REQUEST_BIT);
 
 	/*
 	 * Clear PS ready. This will be set to true after PS is ready after
 	 * it transitions to the new level.
 	 */
-	port0_data.ps_ready = false;
+	atomic_clear_bit(&dpm_data->ps_flags, PS_SOURCE_READY_BIT);
 
 	return SNK_REQUEST_VALID;
 }
@@ -195,8 +202,7 @@ static bool port0_policy_cb_is_ps_ready(const struct device *dev)
 {
 	struct port0_data_t *dpm_data = usbc_get_dpm_data(dev);
 
-	/* Return true to inform that the Power Supply is ready */
-	return dpm_data->ps_ready;
+	return atomic_test_bit(&dpm_data->ps_flags, PS_SOURCE_READY_BIT);
 }
 
 /**
@@ -248,7 +254,7 @@ static void port0_notify(const struct device *dev, const enum usbc_policy_notify
 	case MSG_NOT_SUPPORTED_RECEIVED:
 		break;
 	case TRANSITION_PS:
-		dpm_data->ps_tran_start = true;
+		atomic_set_bit(&dpm_data->ps_flags, PS_SOURCE_TRAN_START_BIT);
 		break;
 	case PD_CONNECTED:
 		break;
@@ -332,6 +338,13 @@ int main(void)
 		return 0;
 	}
 
+	/* Get the VBUS measurement device for this port */
+	port0_data.vbus = DEVICE_DT_GET(DT_PHANDLE(USBC_PORT0_NODE, vbus));
+	if (!device_is_ready(port0_data.vbus)) {
+		LOG_ERR("PORT0 vbus not ready");
+		return 0;
+	}
+
 	/* usbc.rst register start */
 	/* Register USB-C Callbacks */
 
@@ -362,13 +375,8 @@ int main(void)
 	usbc_set_dpm_data(usbc_port0, &port0_data);
 	/* usbc.rst user data end */
 
-	/* Flag to show sink request */
-	port0_data.show_sink_request = ATOMIC_INIT(0);
-
-	/* Init power supply transition start */
-	port0_data.ps_tran_start = false;
-	/* Init power supply ready */
-	port0_data.ps_ready = false;
+	/* Initialize atomic ps_flags */
+	port0_data.ps_flags = ATOMIC_INIT(0);
 
 	/* usbc.rst usbc start */
 	/* Start the USB-C Subsystem */
@@ -378,19 +386,23 @@ int main(void)
 	while (1) {
 		/* Perform Application Specific functions */
 
-		/* Transition PS to new level */
-		if (port0_data.ps_tran_start) {
-			/*
-			 * Transition Power Supply to new voltage.
-			 * Okay if this blocks.
-			 */
+		/* Source: Start voltage transition */
+		if (atomic_test_and_clear_bit(&port0_data.ps_flags, PS_SOURCE_TRAN_START_BIT)) {
 			source_ctrl_set(port0_data.pwrctrl, port0_data.obj_pos);
-			port0_data.ps_ready = true;
-			port0_data.ps_tran_start = false;
+			atomic_set_bit(&port0_data.ps_flags, PS_SOURCE_TRAN_IN_PROGRESS_BIT);
 		}
 
-		/* Display Sink Requests */
-		if (atomic_test_and_clear_bit(&port0_data.show_sink_request, 0)) {
+		/* Source: Check if voltage transition is complete */
+		if (atomic_test_bit(&port0_data.ps_flags, PS_SOURCE_TRAN_IN_PROGRESS_BIT)) {
+			if (source_is_ps_ready(port0_data.vbus, port0_data.obj_pos)) {
+				atomic_clear_bit(&port0_data.ps_flags,
+						 PS_SOURCE_TRAN_IN_PROGRESS_BIT);
+				atomic_set_bit(&port0_data.ps_flags, PS_SOURCE_READY_BIT);
+			}
+		}
+
+		/* Source: Display Request */
+		if (atomic_test_and_clear_bit(&port0_data.ps_flags, PS_SOURCE_REQUEST_BIT)) {
 			/* Display the Sink request */
 			dump_sink_request_rdo(port0_data.sink_request.raw_value);
 		}

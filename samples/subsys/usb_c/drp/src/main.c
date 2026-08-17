@@ -9,6 +9,7 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/usb_c/usbc.h>
+#include <zephyr/drivers/usb_c/usbc_vbus.h>
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
@@ -26,10 +27,11 @@ BUILD_ASSERT(DT_ENUM_IDX(USBC_PORT0_NODE, power_role) == TC_ROLE_CAP_DRP,
 	     "Unsupported board: Only Dual Role Power (DRP) device supported");
 
 /* Flag bits for power supply state management */
-#define PS_SOURCE_REQUEST_BIT    0 /* Source: Display sink request */
-#define PS_SOURCE_TRAN_START_BIT 1 /* Source: Start voltage transition */
-#define PS_SOURCE_READY_BIT      2 /* Source: Voltage transition complete */
-#define PS_SINK_READY_BIT        3 /* Sink: Source has finished transition */
+#define PS_SOURCE_REQUEST_BIT          0 /* Source: Display sink request */
+#define PS_SOURCE_TRAN_START_BIT       1 /* Source: Start voltage transition */
+#define PS_SOURCE_TRAN_IN_PROGRESS_BIT 2 /* Source: Voltage transition in progress */
+#define PS_SOURCE_READY_BIT            3 /* Source: Voltage transition complete */
+#define PS_SINK_READY_BIT              4 /* Sink: Source has finished transition */
 
 /* usbc.rst port data object start */
 /**
@@ -58,6 +60,8 @@ static struct port0_data_t {
 	int obj_pos;
 	/** VCONN CC line*/
 	enum tc_cc_polarity vconn_pol;
+	/** VBUS measurement device */
+	const struct device *vbus;
 	/** Atomic ps_flags for power supply state management */
 	atomic_t ps_flags;
 	/** Source Capabilities of the port partner */
@@ -223,7 +227,11 @@ int port0_policy_cb_src_en(const struct device *dev, bool en)
 {
 	struct port0_data_t *dpm_data = usbc_get_dpm_data(dev);
 
-	return source_ctrl_set(dpm_data->pwrctrl, en ? SOURCE_5V : SOURCE_0V);
+	dpm_data->obj_pos = en ? SOURCE_5V : SOURCE_0V;
+	atomic_clear_bit(&dpm_data->ps_flags, PS_SOURCE_READY_BIT);
+	atomic_set_bit(&dpm_data->ps_flags, PS_SOURCE_TRAN_START_BIT);
+
+	return 0;
 }
 
 /**
@@ -515,6 +523,13 @@ int main(void)
 		return 0;
 	}
 
+	/* Get the VBUS measurement device for this port */
+	port0_data.vbus = DEVICE_DT_GET(DT_PHANDLE(USBC_PORT0_NODE, vbus));
+	if (!device_is_ready(port0_data.vbus)) {
+		LOG_ERR("PORT0 vbus not ready");
+		return 0;
+	}
+
 	/* usbc.rst register start */
 	/* Register USB-C Callbacks */
 
@@ -559,14 +574,19 @@ int main(void)
 	/* usbc.rst usbc end */
 
 	while (1) {
-		/* Source: Transition PS to new level */
+		/* Source: Start voltage transition */
 		if (atomic_test_and_clear_bit(&port0_data.ps_flags, PS_SOURCE_TRAN_START_BIT)) {
-			/*
-			 * Transition Power Supply to new voltage.
-			 * Okay if this blocks.
-			 */
 			source_ctrl_set(port0_data.pwrctrl, port0_data.obj_pos);
-			atomic_set_bit(&port0_data.ps_flags, PS_SOURCE_READY_BIT);
+			atomic_set_bit(&port0_data.ps_flags, PS_SOURCE_TRAN_IN_PROGRESS_BIT);
+		}
+
+		/* Source: Check if voltage transition is complete */
+		if (atomic_test_bit(&port0_data.ps_flags, PS_SOURCE_TRAN_IN_PROGRESS_BIT)) {
+			if (source_is_ps_ready(port0_data.vbus, port0_data.obj_pos)) {
+				atomic_clear_bit(&port0_data.ps_flags,
+						 PS_SOURCE_TRAN_IN_PROGRESS_BIT);
+				atomic_set_bit(&port0_data.ps_flags, PS_SOURCE_READY_BIT);
+			}
 		}
 
 		/* Source: Display Request */

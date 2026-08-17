@@ -176,6 +176,26 @@ extern "C" {
 #define PD_V_SAFE_5V_MIN_MV 4750
 
 /**
+ * @brief Minimum acceptable voltage for a new Source output level.
+ *	  The tolerance is -5% of the target voltage.
+ *	  See Table 7-24 Common Source/Sink Electrical Parameters
+ *	  Parameter Name: vSrcNew
+ *
+ * @param mv Target voltage in millivolts
+ */
+#define PD_V_SRC_NEW_MIN_MV(mv) ((mv) - ((mv) * 5 / 100))
+
+/**
+ * @brief Maximum acceptable voltage for a new Source output level.
+ *	  The tolerance is +5% of the target voltage.
+ *	  See Table 7-24 Common Source/Sink Electrical Parameters
+ *	  Parameter Name: vSrcNew
+ *
+ * @param mv Target voltage in millivolts
+ */
+#define PD_V_SRC_NEW_MAX_MV(mv) ((mv) + ((mv) * 5 / 100))
+
+/**
  * @brief Time to reach PD_V_SAFE_0V_MV max in milliseconds.
  *	  See Table 7-24 Common Source/Sink Electrical Parameters
  *	  Parameter Name: tSafe0V

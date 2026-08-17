@@ -46,4 +46,12 @@ int vconn_ctrl_set(const struct device *dev, enum vconn_t v);
  */
 int source_ctrl_set(const struct device *dev, enum source_t v);
 
+/**
+ * @brief Check if VBUS has reached the target level
+ *
+ * @param vbus VBUS measurement device
+ * @param v Target VBUS level
+ */
+bool source_is_ps_ready(const struct device *vbus, enum source_t v);
+
 #endif /* ZEPHYR_SAMPLES_SUBSYS_USBC_COMMON_POWER_CTRL_H */
