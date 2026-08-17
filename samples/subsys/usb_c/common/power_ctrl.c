@@ -12,6 +12,8 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/pwm.h>
+#include <zephyr/drivers/usb_c/usbc_pd.h>
+#include <zephyr/drivers/usb_c/usbc_vbus.h>
 #include <zephyr/logging/log.h>
 
 #include "power_ctrl.h"
@@ -76,6 +78,31 @@ int source_ctrl_set(const struct device *dev, enum source_t v)
 	}
 
 	return pwm_set_pulse_dt(&cfg->pwm_ctl, pwmv);
+}
+
+bool source_is_ps_ready(const struct device *vbus, enum source_t v)
+{
+	int vbus_mv;
+	int target_mv = 0;
+
+	usbc_vbus_measure(vbus, &vbus_mv);
+
+	switch (v) {
+	case SOURCE_0V:
+		return vbus_mv <= PD_V_SAFE_0V_MAX_MV;
+	case SOURCE_5V:
+		target_mv = 5000;
+		break;
+	case SOURCE_9V:
+		target_mv = 9000;
+		break;
+	case SOURCE_15V:
+		target_mv = 15000;
+		break;
+	}
+
+	return (vbus_mv >= PD_V_SRC_NEW_MIN_MV(target_mv)) &&
+	       (vbus_mv <= PD_V_SRC_NEW_MAX_MV(target_mv));
 }
 
 static int power_ctrl_init(const struct device *dev)
