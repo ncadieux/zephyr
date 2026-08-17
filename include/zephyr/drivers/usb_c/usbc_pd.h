@@ -288,6 +288,22 @@ extern "C" {
 #define PD_T_CHUNKING_NOT_SUPPORTED_MAX_MS 50
 
 /**
+ * @brief Maximum time allowed for the old Source to turn off VBUS during
+ *	  a Power Role Swap.
+ *	  See Table 6-68 Time Values
+ *	  Parameter Name: tPSSourceOff
+ */
+#define PD_T_PS_SOURCE_OFF_SPR_MAX_MS 750
+
+/**
+ * @brief Maximum time allowed for the new Source to turn on VBUS during
+ *	  a Power Role Swap.
+ *	  See Table 6-68 Time Values
+ *	  Parameter Name: tPSSourceOn
+ */
+#define PD_T_PS_SOURCE_ON_SPR_MAX_MS 480
+
+/**
  * @brief Convert bytes to PD Header data object count, where a
  *	  data object is 4-bytes.
  *
