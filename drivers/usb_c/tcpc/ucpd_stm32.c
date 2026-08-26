@@ -396,11 +396,6 @@ static int ucpd_set_cc(const struct device *dev, enum tc_cc_pull cc_pull)
 	struct tcpc_data *data = dev->data;
 	uint32_t cr;
 
-	/* Disable dead battery if it's active */
-	if (data->dead_battery_active) {
-		dead_battery(dev, false);
-	}
-
 	cr = stm32_reg_read(&config->ucpd_port->CR);
 
 	/*
@@ -428,6 +423,18 @@ static int ucpd_set_cc(const struct device *dev, enum tc_cc_pull cc_pull)
 #ifdef CONFIG_SOC_SERIES_STM32G0X
 	update_stm32g0x_cc_line(config->ucpd_port);
 #endif
+
+	/*
+	 * Release the dead battery resistors only after the requested pull has
+	 * been applied. Releasing them first leaves the CC lines unterminated
+	 * in between, and a Source needs no more than tSRCDisconnect to act on
+	 * that and remove VBUS, browning out a system powered from it. This
+	 * ordering also matches the reference manual, which disables the dead
+	 * battery support once UCPD has been configured.
+	 */
+	if (data->dead_battery_active) {
+		dead_battery(dev, false);
+	}
 
 	return 0;
 }
