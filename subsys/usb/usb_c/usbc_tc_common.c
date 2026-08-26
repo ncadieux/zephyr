@@ -134,7 +134,15 @@ static int tc_init(const struct device *dev)
 	int ret;
 
 	/* Initialize the timers */
+#ifdef CONFIG_USBC_CSM_SUPPORTS_SOURCE
 	usbc_timer_init(&tc->tc_t_error_recovery, TC_T_ERROR_RECOVERY_SOURCE_MIN_MS);
+#else
+	/*
+	 * The longer tErrorRecovery only applies to a Source that was sourcing
+	 * VCONN. A port that can never source uses the self-powered minimum.
+	 */
+	usbc_timer_init(&tc->tc_t_error_recovery, TC_T_ERROR_RECOVERY_SELF_POWERED_MIN_MS);
+#endif
 	usbc_timer_init(&tc->tc_t_cc_debounce, TC_T_CC_DEBOUNCE_MAX_MS);
 	usbc_timer_init(&tc->tc_t_rp_value_change, TC_T_RP_VALUE_CHANGE_MAX_MS);
 #ifdef CONFIG_USBC_CSM_SUPPORTS_SOURCE
