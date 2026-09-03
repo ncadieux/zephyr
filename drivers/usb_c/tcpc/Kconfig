@@ -19,6 +19,14 @@ config USBC_TCPC_INIT_PRIORITY
 	  Note that the priority needs to be lower than the USBC stack
 	  so that it can start before the USBC sub-system.
 
+config USBC_TCPC_DEAD_BATTERY
+	bool
+	help
+	  Selected by a TCPC driver when at least one enabled port applies the
+	  USB-C dead battery terminations to the CC lines. This is a hidden
+	  symbol; it exists so that the USB-C stack can pick a safe default for
+	  a build that may be powered through those terminations.
+
 config USBC_TCPC_SHELL
 	bool "Shell commands for TCPC subsystem"
 	help

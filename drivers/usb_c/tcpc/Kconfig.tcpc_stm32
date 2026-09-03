@@ -8,6 +8,8 @@ config USBC_TCPC_STM32
 	default y
 	depends on DT_HAS_ST_STM32_UCPD_ENABLED
 	select PINCTRL
+	select USBC_TCPC_DEAD_BATTERY if \
+		$(dt_compat_any_has_prop,$(DT_COMPAT_ST_STM32_UCPD),dead-battery,True)
 	help
 	  Enable USB-C TCPC support on the STM32 G0, G4, L5, and U5 family of
 	  processors.

@@ -9,6 +9,8 @@ config USBC_TCPC_NUMAKER
 	select HAS_NUMAKER_ADC
 	select HAS_NUMAKER_TMR
 	select PINCTRL
+	select USBC_TCPC_DEAD_BATTERY if \
+		$(dt_compat_any_has_prop,$(DT_COMPAT_NUVOTON_NUMAKER_TCPC),dead-battery,True)
 	depends on DT_HAS_NUVOTON_NUMAKER_TCPC_ENABLED
 	help
 	  Enable USB-C TCPC support for Nuvoton NuMaker chip with UTCPD.

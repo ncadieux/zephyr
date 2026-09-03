@@ -41,6 +41,30 @@ config USBC_STATE_MACHINE_CYCLE_TIME
 	  The USB-C state machine is run in a loop and the cycle time is the
 	  delay before running the loop again.
 
+config USBC_TC_INIT_PORT_RESET
+	bool "Reset the port at init by opening the CC lines"
+	default n if USBC_TCPC_DEAD_BATTERY
+	default y
+	help
+	  Open the CC lines for tErrorRecovery when the Type-C layer starts,
+	  forcing a detach and reattach of a port partner that was already
+	  connected. This is useful after a warm reset, where the partner would
+	  otherwise hold a contract this port no longer knows about.
+
+	  Disable this on a board that is powered through the USB-C dead
+	  battery terminations. There, opening the CC lines removes the Rd that
+	  made the Source apply VBUS, so the Source stops sourcing within
+	  tSRCDisconnect and the board browns out long before tErrorRecovery
+	  expires. The port goes straight to Unattached instead, whose Rd takes
+	  over the terminations without ever opening them.
+
+	  The default follows USBC_TCPC_DEAD_BATTERY, which the TCPC drivers
+	  select when a port in this build declares dead battery support.
+
+	  Turning this off does not remove the ability to recover a stale
+	  contract: a Sink that receives no Source capabilities times out
+	  tTypeCSinkWaitCap and the Policy Engine sends a Hard Reset.
+
 config BUILD_OUTPUT_VIF
 	bool "Generate VIF policies of USB-C in XML format"
 	depends on DT_HAS_USB_C_CONNECTOR_ENABLED
