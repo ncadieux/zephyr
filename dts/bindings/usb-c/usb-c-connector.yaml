@@ -31,6 +31,22 @@ properties:
     description: |
         Power path controller for this port
 
+  dead-battery-powered:
+    type: boolean
+    description: |
+      This port may be powered through its USB-C dead battery terminations.
+
+      A Source applies VBUS because it sees the dead battery Rd, so such a
+      port must not open its CC lines while VBUS is its only supply. Opening
+      them is indistinguishable from a detach: the Source removes VBUS within
+      tSRCDisconnect and the system browns out. The USB-C stack uses this to
+      suppress the CC open at init that USBC_TC_INIT_PORT_RESET would
+      otherwise perform, and starts the port unattached instead.
+
+      Set this whether the terminations come from the Type-C Port Controller
+      itself or from a separate device the controller cannot see, such as a
+      USB-C port protection IC.
+
   power-role:
     type: string
     required: true

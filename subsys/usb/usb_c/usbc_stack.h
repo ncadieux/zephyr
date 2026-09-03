@@ -41,6 +41,8 @@ struct usbc_port_config {
 	void (*create_thread)(const struct device *dev);
 	/** The thread stack for this port's thread */
 	k_thread_stack_t *stack;
+	/** True if this port may be powered through its dead battery terminations */
+	bool dead_battery_powered;
 };
 
 /**

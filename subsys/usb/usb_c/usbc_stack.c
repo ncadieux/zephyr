@@ -88,6 +88,7 @@ static ALWAYS_INLINE void usbc_handler(void *port_dev)
                                                                                                    \
 	static const struct usbc_port_config usbc_port_config_##inst = {                           \
 		.create_thread = create_thread_##inst,                                             \
+		.dead_battery_powered = DT_INST_PROP(inst, dead_battery_powered),                  \
 	};                                                                                         \
                                                                                                    \
 	DEVICE_DT_INST_DEFINE(inst, &usbc_subsys_init, NULL, &usbc_port_data_##inst,               \

@@ -23,6 +23,7 @@
 			vbus = <&vbus1>;
 			power-role = "sink";
 			sink-pdos = <PDO_FIXED(5000, 500, 0)>;
+			dead-battery-powered;
 		};
 	};
 };
