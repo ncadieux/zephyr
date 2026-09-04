@@ -41,6 +41,26 @@ config USBC_STATE_MACHINE_CYCLE_TIME
 	  The USB-C state machine is run in a loop and the cycle time is the
 	  delay before running the loop again.
 
+config USBC_TC_INIT_PORT_RESET
+	bool "Reset the port at init by opening the CC lines"
+	default y
+	help
+	  Open the CC lines for tErrorRecovery when the Type-C layer starts,
+	  forcing a detach and reattach of a port partner that was already
+	  connected. This is useful after a warm reset, where the partner would
+	  otherwise hold a contract this port no longer knows about.
+
+	  A port whose Type-C Port Controller applies the USB-C dead battery
+	  terminations never does this, whatever this option says, because
+	  opening the CC lines removes the Rd that made the Source apply VBUS
+	  and a board powered through it browns out. Such a port starts out
+	  unattached instead, and the terminations are handed over rather than
+	  dropped.
+
+	  Turning this off does not remove the ability to recover a stale
+	  contract: a Sink that receives no Source capabilities times out
+	  tTypeCSinkWaitCap and the Policy Engine sends a Hard Reset.
+
 config BUILD_OUTPUT_VIF
 	bool "Generate VIF policies of USB-C in XML format"
 	depends on DT_HAS_USB_C_CONNECTOR_ENABLED

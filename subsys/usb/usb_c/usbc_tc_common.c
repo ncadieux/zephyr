@@ -129,6 +129,7 @@ bool tc_is_in_attached_state(const struct device *dev)
 static int tc_init(const struct device *dev)
 {
 	struct usbc_port_data *data = dev->data;
+	const struct usbc_port_config *const config = dev->config;
 	struct tc_sm_t *tc = data->tc;
 	const struct device *tcpc = data->tcpc;
 	int ret;
@@ -176,16 +177,32 @@ static int tc_init(const struct device *dev)
 #endif
 
 	/* Initialize the state machine */
-	/*
-	 * Transition to Disabled state to ensure port is in a known disabled state.
-	 */
-	tc_set_state(dev, TC_DISABLED_STATE);
+	if (IS_ENABLED(CONFIG_USBC_TC_INIT_PORT_RESET) && !config->tcpc_dead_battery) {
+		/*
+		 * Transition to Disabled state to ensure port is in a known disabled state.
+		 */
+		tc_set_state(dev, TC_DISABLED_STATE);
+
+		/*
+		 * Start out in error recovery state so the CC lines are opened for a
+		 * short while if this is a system reset.
+		 */
+		tc_set_state(dev, TC_ERROR_RECOVERY_STATE);
+
+		return 0;
+	}
 
 	/*
-	 * Start out in error recovery state so the CC lines are opened for a
-	 * short while if this is a system reset.
+	 * Start out unattached without ever opening the CC lines. Both the
+	 * Disabled and the Error Recovery state descend from the CC Open super
+	 * state, which would remove the dead battery Rd this port may be
+	 * powered through.
 	 */
-	tc_set_state(dev, TC_ERROR_RECOVERY_STATE);
+#ifdef CONFIG_USBC_CSM_SUPPORTS_SINK
+	tc_set_state(dev, TC_UNATTACHED_SNK_STATE);
+#else
+	tc_set_state(dev, TC_UNATTACHED_SRC_STATE);
+#endif
 
 	return 0;
 }
