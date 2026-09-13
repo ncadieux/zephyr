@@ -15,6 +15,10 @@
 #include <zephyr/drivers/clock_control/stm32_clock_control.h>
 #include "clock_stm32_ll_common.h"
 
+#if IS_ENABLED(STM32_HSI48_CRS_USB_SOF)
+#include <stm32_ll_crs.h>
+#endif
+
 #if defined(STM32_PLL_ENABLED)
 
 /**
@@ -146,6 +150,14 @@ void config_enable_default_clocks(void)
 {
 	/* Enable PWR clock, required to access BDCR and PWR_CR */
 	LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_PWR);
+
+#if IS_ENABLED(STM32_HSI48_CRS_USB_SOF)
+	/* Trim HSI48 against USB start-of-frame packets. */
+	LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_CRS);
+	LL_CRS_SetSyncSignalSource(LL_CRS_SYNC_SOURCE_USB);
+	LL_CRS_EnableAutoTrimming();
+	LL_CRS_EnableFreqErrorCounter();
+#endif
 
 #ifndef CONFIG_SOC_SERIES_STM32F3X
 #if defined(CONFIG_EXTI_STM32) || defined(CONFIG_USB_DC_STM32)
