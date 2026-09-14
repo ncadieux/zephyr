@@ -1,0 +1,222 @@
+/*
+ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+/* Reuse the MCU hardware description and package pin functions. */
+#include <st/f0/stm32f072Xb.dtsi>
+#include <st/f0/stm32f072c(8-b)tx-pinctrl.dtsi>
+
+/* Identify the board and assign its default system resources. */
+/ {
+	model = "Twonkie v2";
+	compatible = "twonkie-v2";
+
+	/* Select internal memory and the default console and shell UART. */
+	chosen {
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+		zephyr,console = &usart1;
+		zephyr,shell-uart = &usart1;
+	};
+
+	/* Provide LED and power monitor aliases for applications and samples. */
+	aliases {
+		led0 = &led_red;
+		led1 = &led_green;
+		led2 = &led_blue;
+		vbus = &vbus_monitor;
+		vconn = &vconn_monitor;
+	};
+
+	/* Describe the board LEDs controlled through GPIOs. */
+	leds {
+		compatible = "gpio-leds";
+
+		/* Connect the green LED to PB10, active low. */
+		led_green: led-green {
+			gpios = <&gpiob 10 GPIO_ACTIVE_LOW>;
+		};
+
+		/* Connect the red LED to PB11, active low. */
+		led_red: led-red {
+			gpios = <&gpiob 11 GPIO_ACTIVE_LOW>;
+		};
+
+		/* Connect the blue LED to PB14, active low. */
+		led_blue: led-blue {
+			gpios = <&gpiob 14 GPIO_ACTIVE_LOW>;
+		};
+	};
+};
+
+/* Enable the internal 8 MHz oscillator as the PLL reference. */
+&clk_hsi {
+	status = "okay";
+};
+
+/* Enable the internal 48 MHz oscillator with USB automatic trimming. */
+&clk_hsi48 {
+	status = "okay";
+	crs-usb-sof;
+};
+
+/* Multiply HSI by six to provide a 48 MHz system clock source. */
+&pll {
+	clocks = <&clk_hsi>;
+	prediv = <1>;
+	mul = <6>;
+	status = "okay";
+};
+
+/* Select the PLL system clock and run the AHB and APB buses without division. */
+&rcc {
+	clocks = <&pll>;
+	clock-frequency = <DT_FREQ_M(48)>;
+	ahb-prescaler = <1>;
+	apb1-prescaler = <1>;
+};
+
+/* Configure the physical UART on PA9/PA10 for a 115200-baud console. */
+&usart1 {
+	pinctrl-0 = <&usart1_tx_pa9 &usart1_rx_pa10>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	status = "okay";
+};
+
+/* Enable USB on PA11/PA12 using the internal 48 MHz oscillator. */
+zephyr_udc0: &usb {
+	pinctrl-0 = <&usb_dm_pa11 &usb_dp_pa12>;
+	pinctrl-names = "default";
+	clocks = <&rcc STM32_CLOCK(APB1, 23)>,
+		 <&rcc STM32_SRC_HSI48 USB_SEL(0)>;
+	status = "okay";
+};
+
+/* Connect the INA237 monitors over I2C1 on PB6/PB7 at 100 kHz. */
+&i2c1 {
+	pinctrl-0 = <&i2c1_scl_pb6 &i2c1_sda_pb7>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+	status = "okay";
+
+	/* Measure VBUS voltage and current with the INA237 at I2C address 0x40. */
+	vbus_monitor: sensor@40 {
+		compatible = "ti,ina237";
+		reg = <0x40>;
+		current-lsb-microamps = <1000>;
+		rshunt-micro-ohms = <12000>;
+		adc-mode = "Bus and shunt voltage continuous";
+	};
+
+	/* Measure VCONN voltage and current with the INA237 at I2C address 0x45. */
+	/* This INA237 supports VCONN voltage and current monitoring only on CC1. */
+	vconn_monitor: sensor@45 {
+		compatible = "ti,ina237";
+		reg = <0x45>;
+		current-lsb-microamps = <1000>;
+		rshunt-micro-ohms = <12000>;
+		/* Keep the monitor idle until measurement is needed. */
+		adc-mode = "Shutdown continuous";
+	};
+};
+
+/* Enable the MCU ADC to measure CC voltages through PA1 and PA3. */
+&adc1 {
+	pinctrl-0 = <&adc_in1_pa1 &adc_in3_pa3>;
+	pinctrl-names = "default";
+	st,adc-clock-source = "SYNC";
+	/* Divide 48 MHz by four for a 12 MHz ADC clock, below its 14 MHz limit. */
+	st,adc-prescaler = <4>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	/* Measure CC1 on ADC channel 1 with 12-bit resolution. */
+	channel@1 {
+		reg = <1>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,vref-mv = <3300>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_MAX>;
+		zephyr,resolution = <12>;
+	};
+
+	/* Measure CC2 on ADC channel 3 with 12-bit resolution. */
+	channel@3 {
+		reg = <3>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,vref-mv = <3300>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_MAX>;
+		zephyr,resolution = <12>;
+	};
+};
+
+/* Configure GPIO port A controls for CC sensing, termination resistors, and transmitters. */
+&gpioa {
+	/* Configure CC sense-enable GPIOs as push-pull outputs, initially high (enabled). */
+	cc-sense-enable {
+		gpio-hog;
+		gpios = <0 GPIO_ACTIVE_HIGH>, <2 GPIO_ACTIVE_HIGH>;
+		output-high;
+	};
+
+	/* Configure CC resistor GPIOs as open-drain outputs, initially high (disconnected). */
+	cc-resistors-release {
+		gpio-hog;
+		gpios = <8 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>,
+			 <13 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>,
+			 <15 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		output-high;
+	};
+
+	/* Configure CC2 TX data and CC1 TX enable as push-pull outputs, initially low. */
+	cc-tx-disable {
+		gpio-hog;
+		gpios = <6 GPIO_ACTIVE_HIGH>, <14 GPIO_ACTIVE_HIGH>;
+		output-low;
+	};
+};
+
+/* Configure GPIO port B controls for CC termination resistors and transmit data. */
+&gpiob {
+	/* Configure CC resistor GPIOs as open-drain outputs, initially high (disconnected). */
+	cc-resistors-release {
+		gpio-hog;
+		gpios = <3 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>,
+			 <5 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>,
+			 <8 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>,
+			 <12 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>,
+			 <13 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>,
+			 <15 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		output-high;
+	};
+
+	/* Configure the CC transmit-data GPIO as a push-pull output, initially low. */
+	cc-tx-data-low {
+		gpio-hog;
+		gpios = <4 GPIO_ACTIVE_HIGH>;
+		output-low;
+	};
+};
+
+/* Configure GPIO port C controls for CC termination resistors and transmit enable. */
+&gpioc {
+	/* Configure the CC resistor GPIO as an open-drain output, initially high (disconnected). */
+	cc-resistors-release {
+		gpio-hog;
+		gpios = <14 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		output-high;
+	};
+
+	/* Configure CC2 TX enable as a push-pull output, initially low (disabled). */
+	cc-tx-disable {
+		gpio-hog;
+		gpios = <13 GPIO_ACTIVE_HIGH>;
+		output-low;
+	};
+};

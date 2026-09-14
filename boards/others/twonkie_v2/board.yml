@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+board:
+  name: twonkie_v2
+  full_name: Twonkie v2
+  vendor: others
+  socs:
+    - name: stm32f072xb
