@@ -32,3 +32,25 @@ properties:
   alert-gpios:
     type: phandle-array
     description: Alert pin
+
+  fetch-channels:
+    type: string-array
+    enum:
+      - bus-voltage
+      - shunt-voltage
+      - current
+      - power
+      - die-temperature
+      - energy
+      - charge
+    description: |
+      Channels read by SENSOR_CHAN_ALL, in the driver's normal register order.
+      If omitted, all channels supported by the device are read, preserving
+      the default behavior. The list must be nonempty and contain only channels
+      supported by the device variant. Explicit single-channel fetches remain
+      available, including channels not listed here. Retrieve a channel only
+      after fetching it; unselected cached values are not refreshed by ALL.
+      This property controls I2C register reads, not ADC operating mode,
+      conversion time, averaging, or physical conversion enablement. Configure
+      those separately. For example, [bus-voltage, shunt-voltage] avoids reading
+      current, power and temperature when only raw bus/shunt data is needed.

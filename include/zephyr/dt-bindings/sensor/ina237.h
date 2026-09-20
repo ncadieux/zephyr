@@ -143,6 +143,11 @@
 		      avg)  \
 	(((mode) << 12) | ((vbusct) << 9) | ((vshct) << 6) | ((vtct) << 3) | (avg))
 
+/** Latch ALERT until the diagnostic register is read. */
+#define INA237_ALERT_LATCH_ENABLE (1U << 15)
+/** Assert ALERT when the selected ADC conversions finish. */
+#define INA237_ALERT_CONV_READY_ENABLE (1U << 14)
+
 /** @} */
 
 #endif /* ZEPHYR_INCLUDE_DT_BINDINGS_SENSOR_INA237_H_ */

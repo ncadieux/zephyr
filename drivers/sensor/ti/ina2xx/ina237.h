@@ -46,6 +46,8 @@ struct ina237_data {
 	const struct device *dev;
 	enum sensor_channel chan;
 	struct ina2xx_trigger trigger;
+	int fetch_result;
+	uint16_t diagnostics;
 };
 
 struct ina237_config {

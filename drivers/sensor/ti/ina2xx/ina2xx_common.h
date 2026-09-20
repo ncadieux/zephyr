@@ -34,6 +34,32 @@
 		.shift = (_shift),                                              \
 	}
 
+/* Logical fetch selections, independent of register addresses and ADC mode. */
+#define INA2XX_FETCH_BUS_VOLTAGE     BIT(0)
+#define INA2XX_FETCH_SHUNT_VOLTAGE   BIT(1)
+#define INA2XX_FETCH_CURRENT         BIT(2)
+#define INA2XX_FETCH_POWER           BIT(3)
+#define INA2XX_FETCH_DIE_TEMPERATURE BIT(4)
+#define INA2XX_FETCH_ENERGY          BIT(5)
+#define INA2XX_FETCH_CHARGE          BIT(6)
+#define INA230_FETCH_SUPPORTED                                                                     \
+	(INA2XX_FETCH_BUS_VOLTAGE | INA2XX_FETCH_CURRENT | INA2XX_FETCH_POWER)
+#define INA226_FETCH_SUPPORTED (INA230_FETCH_SUPPORTED | INA2XX_FETCH_SHUNT_VOLTAGE)
+#define INA237_FETCH_SUPPORTED (INA226_FETCH_SUPPORTED | INA2XX_FETCH_DIE_TEMPERATURE)
+#define INA228_FETCH_SUPPORTED (INA237_FETCH_SUPPORTED | INA2XX_FETCH_ENERGY | INA2XX_FETCH_CHARGE)
+
+#define INA2XX_DT_FETCH_ELEMENT(node_id, prop, idx)                                                \
+	| UTIL_CAT(INA2XX_FETCH_, DT_STRING_UPPER_TOKEN_BY_IDX(node_id, prop, idx))
+#define INA2XX_DT_FETCH_CHANNELS(inst, supported)                                                  \
+	(COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, fetch_channels), \
+		(0 DT_FOREACH_PROP_ELEM(DT_DRV_INST(inst), fetch_channels, \
+				      INA2XX_DT_FETCH_ELEMENT)), (supported)))
+#define INA2XX_DT_VALIDATE_FETCH_CHANNELS(inst, supported)                                         \
+	BUILD_ASSERT(INA2XX_DT_FETCH_CHANNELS(inst, supported) != 0,                               \
+		     "fetch-channels must not be empty");                                          \
+	BUILD_ASSERT((INA2XX_DT_FETCH_CHANNELS(inst, supported) & ~(supported)) == 0,              \
+		     "fetch-channels contains a channel unsupported by this INA variant")
+
 /**
  * @brief INA2XX register mapping.
  *
@@ -106,6 +132,7 @@ struct ina2xx_config {
 	uint16_t config;
 	uint16_t adc_config;
 	uint16_t cal;
+	uint8_t fetch_channels; /* Channels refreshed by SENSOR_CHAN_ALL. */
 	const struct ina2xx_reg *id_reg;
 	const struct ina2xx_reg *config_reg;
 	const struct ina2xx_reg *adc_config_reg;

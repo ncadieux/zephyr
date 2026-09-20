@@ -125,43 +125,59 @@ static int ina2xx_fetch_charge(const struct device *dev)
 #endif /* CONFIG_INA2XX_HAS_CHANNEL_CHARGE */
 }
 
+/** @brief Refresh only the per-device selection, preserving order and first-error handling. */
 static int ina2xx_fetch_all(const struct device *dev)
 {
+	const struct ina2xx_config *config = dev->config;
 	int ret;
 
-	ret = ina2xx_fetch_bus_voltage(dev);
-	if (ret < 0 && ret != -ENOTSUP) {
-		return ret;
+	if (config->fetch_channels & INA2XX_FETCH_BUS_VOLTAGE) {
+		ret = ina2xx_fetch_bus_voltage(dev);
+		if (ret < 0 && ret != -ENOTSUP) {
+			return ret;
+		}
 	}
 
-	ret = ina2xx_fetch_shunt_voltage(dev);
-	if (ret < 0 && ret != -ENOTSUP) {
-		return ret;
+	if (config->fetch_channels & INA2XX_FETCH_SHUNT_VOLTAGE) {
+		ret = ina2xx_fetch_shunt_voltage(dev);
+		if (ret < 0 && ret != -ENOTSUP) {
+			return ret;
+		}
 	}
 
-	ret = ina2xx_fetch_current(dev);
-	if (ret < 0 && ret != -ENOTSUP) {
-		return ret;
+	if (config->fetch_channels & INA2XX_FETCH_CURRENT) {
+		ret = ina2xx_fetch_current(dev);
+		if (ret < 0 && ret != -ENOTSUP) {
+			return ret;
+		}
 	}
 
-	ret = ina2xx_fetch_power(dev);
-	if (ret < 0 && ret != -ENOTSUP) {
-		return ret;
+	if (config->fetch_channels & INA2XX_FETCH_POWER) {
+		ret = ina2xx_fetch_power(dev);
+		if (ret < 0 && ret != -ENOTSUP) {
+			return ret;
+		}
 	}
 
-	ret = ina2xx_fetch_die_temp(dev);
-	if (ret < 0 && ret != -ENOTSUP) {
-		return ret;
+	if (config->fetch_channels & INA2XX_FETCH_DIE_TEMPERATURE) {
+		ret = ina2xx_fetch_die_temp(dev);
+		if (ret < 0 && ret != -ENOTSUP) {
+			return ret;
+		}
 	}
 
-	ret = ina2xx_fetch_energy(dev);
-	if (ret < 0 && ret != -ENOTSUP) {
-		return ret;
+	if (config->fetch_channels & INA2XX_FETCH_ENERGY) {
+		ret = ina2xx_fetch_energy(dev);
+		if (ret < 0 && ret != -ENOTSUP) {
+			return ret;
+		}
 	}
 
-	ret = ina2xx_fetch_charge(dev);
-	if (ret < 0 && ret != -ENOTSUP) {
-		return ret;
+	if (config->fetch_channels & INA2XX_FETCH_CHARGE) {
+		ret = ina2xx_fetch_charge(dev);
+		if (ret < 0 && ret != -ENOTSUP) {
+			return ret;
+		}
 	}
 
 	return 0;

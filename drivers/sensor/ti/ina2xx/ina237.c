@@ -61,6 +61,13 @@ static int ina237_channel_get(const struct device *dev, enum sensor_channel chan
 			      struct sensor_value *val)
 {
 	int ret;
+	const struct ina237_data *data = dev->data;
+
+	/* A trigger callback can report failure; never return an older cached value. */
+	if (data->fetch_result != 0) {
+		return data->fetch_result;
+	}
+
 
 	if (chan == SENSOR_CHAN_VSHUNT) {
 		return ina237_get_vshunt(dev, val);
@@ -128,6 +135,13 @@ static int ina228_channel_get(const struct device *dev, enum sensor_channel chan
 			      struct sensor_value *val)
 {
 	int ret;
+	const struct ina237_data *data = dev->data;
+
+	/* A trigger callback can report failure; never return an older cached value. */
+	if (data->fetch_result != 0) {
+		return data->fetch_result;
+	}
+
 
 	if (chan == SENSOR_CHAN_VSHUNT) {
 		return ina228_get_vshunt(dev, val);
@@ -239,7 +253,11 @@ static int ina237_sample_fetch(const struct device *dev, enum sensor_channel cha
 	}
 
 #if DT_HAS_COMPAT_STATUS_OKAY(ti_ina228)
-	if ((chan == SENSOR_CHAN_ALL) ||
+	const struct ina237_config *config = dev->config;
+
+	/* Do not clear accumulators that this ALL request deliberately skipped. */
+	if ((chan == SENSOR_CHAN_ALL &&
+	     (config->common.fetch_channels & (INA2XX_FETCH_ENERGY | INA2XX_FETCH_CHARGE))) ||
 		(chan == (enum sensor_channel)SENSOR_CHAN_INA2XX_ENERGY) ||
 		(chan == (enum sensor_channel)SENSOR_CHAN_INA2XX_CHARGE)) {
 		return ina228_reset_accumulators(dev);
@@ -249,6 +267,7 @@ static int ina237_sample_fetch(const struct device *dev, enum sensor_channel cha
 	return 0;
 }
 
+/** @brief Read conversion results and notify the application even on I2C failure. */
 static void ina237_trigger_work_handler(struct k_work *work)
 {
 	struct ina2xx_trigger *trigg = CONTAINER_OF(work, struct ina2xx_trigger, conversion_work);
@@ -258,16 +277,15 @@ static void ina237_trigger_work_handler(struct k_work *work)
 	int ret;
 	uint16_t reg_alert;
 
-	/* Read reg alert to clear alerts */
+	/* Cache diagnostics before clearing the latched conversion-ready alert. */
 	ret = ina2xx_reg_read_16(&common->bus, INA237_REG_ALERT, &reg_alert);
-	if (ret < 0) {
-		LOG_ERR("Failed to read alert register!");
-		return;
+	data->diagnostics = ret == 0 ? reg_alert : 0;
+	if (ret == 0) {
+		ret = ina2xx_sample_fetch(data->dev, data->chan);
 	}
-
-	ret = ina2xx_sample_fetch(data->dev, data->chan);
+	data->fetch_result = ret;
 	if (ret < 0) {
-		LOG_WRN("Unable to read data, ret %d", ret);
+		LOG_ERR("Triggered sample fetch failed (%d)", ret);
 	}
 
 	if (data->trigger.handler_alert) {
@@ -308,9 +326,41 @@ static int ina237_init(const struct device *dev)
 			LOG_ERR("Failed to write alert configuration register!");
 			return ret;
 		}
+
+		uint16_t alert;
+
+		/* The sensor may remain powered across an MCU reset. Clear a retained
+		 * ALERT latch after arming the IRQ so the next conversion can produce
+		 * a falling edge. Restarting the ADC alone does not release this latch.
+		 */
+		ret = ina2xx_reg_read_16(&common->bus, INA237_REG_ALERT, &alert);
+		if (ret < 0) {
+			LOG_ERR("Failed to clear pending alert during initialization!");
+			return ret;
+		}
 	}
 
 	return 0;
+}
+
+/** @brief Expose the triggered fetch result without reading/clearing ALERT again. */
+static int ina237_attr_get(const struct device *dev, enum sensor_channel chan,
+			  enum sensor_attribute attr, struct sensor_value *val)
+{
+	struct ina237_data *data = dev->data;
+
+	if (attr == (enum sensor_attribute)SENSOR_ATTR_INA2XX_DIAGNOSTICS) {
+		if (!ina237_is_triggered_mode_set(dev)) {
+			return -ENOTSUP;
+		}
+		if (data->fetch_result != 0) {
+			return data->fetch_result;
+		}
+		val->val1 = data->diagnostics;
+		val->val2 = 0;
+		return 0;
+	}
+	return ina2xx_attr_get(dev, chan, attr, val);
 }
 
 static int ina237_trigger_set(const struct device *dev, const struct sensor_trigger *trig,
@@ -326,13 +376,28 @@ static int ina237_trigger_set(const struct device *dev, const struct sensor_trig
 	ina237->trigger.handler_alert = handler;
 	ina237->trigger.trig_alert = trig;
 
+	if (handler != NULL) {
+		const struct ina237_config *config = dev->config;
+		int active = gpio_pin_get_dt(&config->alert_gpio);
+
+		if (active < 0) {
+			return active;
+		}
+		/* A startup conversion can latch ALERT before the application subscribes.
+		 * Service the active level as well as future edges, using the normal worker.
+		 */
+		if (active != 0) {
+			k_work_submit(&ina237->trigger.conversion_work);
+		}
+	}
+
 	return 0;
 }
 
 #if DT_HAS_COMPAT_STATUS_OKAY(ti_ina237)
 static DEVICE_API(sensor, ina237_driver_api) = {
 	.attr_set = ina2xx_attr_set,
-	.attr_get = ina2xx_attr_get,
+	.attr_get = ina237_attr_get,
 	.trigger_set = ina237_trigger_set,
 	.sample_fetch = ina237_sample_fetch,
 	.channel_get = ina237_channel_get,
@@ -342,7 +407,7 @@ static DEVICE_API(sensor, ina237_driver_api) = {
 #if DT_HAS_COMPAT_STATUS_OKAY(ti_ina228)
 static DEVICE_API(sensor, ina228_driver_api) = {
 	.attr_set = ina2xx_attr_set,
-	.attr_get = ina2xx_attr_get,
+	.attr_get = ina237_attr_get,
 	.trigger_set = ina237_trigger_set,
 	.sample_fetch = ina237_sample_fetch,
 	.channel_get = ina228_channel_get,
@@ -366,6 +431,7 @@ static DEVICE_API(sensor, ina228_driver_api) = {
 	DT_INST_PROP(inst, rshunt_micro_ohms) / 10000000ULL
 
 #define INA237_DRIVER_INIT(inst)                                               \
+	INA2XX_DT_VALIDATE_FETCH_CHANNELS(inst, INA237_FETCH_SUPPORTED); \
 	static struct ina237_data ina237_data_##inst;                              \
 	static const struct ina237_config ina237_config_##inst = {                 \
 		.common = {                                                            \
@@ -378,6 +444,7 @@ static DEVICE_API(sensor, ina228_driver_api) = {
 			.config_reg = &ina237_config,                                      \
 			.adc_config_reg = &ina237_adc_config,                              \
 			.cal_reg = &ina237_shunt_cal,                                      \
+			.fetch_channels = INA2XX_DT_FETCH_CHANNELS(inst, INA237_FETCH_SUPPORTED), \
 			.channels = &ina237_channels,                                      \
 		},                                                                     \
 		.alert_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, alert_gpios, {0}),        \
@@ -388,6 +455,7 @@ static DEVICE_API(sensor, ina228_driver_api) = {
 				    CONFIG_SENSOR_INIT_PRIORITY, &ina237_driver_api);
 
 #define INA228_DRIVER_INIT(inst)                                               \
+	INA2XX_DT_VALIDATE_FETCH_CHANNELS(inst, INA228_FETCH_SUPPORTED); \
 	static struct ina237_data ina228_data_##inst;                              \
 	static const struct ina237_config ina228_config_##inst = {                 \
 		.common = {                                                            \
@@ -399,6 +467,7 @@ static DEVICE_API(sensor, ina228_driver_api) = {
 			.config_reg = &ina237_config,                                      \
 			.adc_config_reg = &ina237_adc_config,                              \
 			.cal_reg = &ina237_shunt_cal,                                      \
+			.fetch_channels = INA2XX_DT_FETCH_CHANNELS(inst, INA228_FETCH_SUPPORTED), \
 			.channels = &ina228_channels,                                      \
 		},                                                                     \
 	};                                                                         \

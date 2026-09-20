@@ -47,6 +47,8 @@ enum sensor_channel_ina2xx {
 	 * - @c sensor_value.val2 is the fractional part (in millionths of a coulomb).
 	 */
 	SENSOR_CHAN_INA2XX_CHARGE,
+
+
 };
 
 /**
@@ -60,6 +62,12 @@ enum sensor_attribute_ina2xx {
 	 * - @c sensor_value.val2 is unused (always 0).
 	 */
 	SENSOR_ATTR_ADC_CONFIGURATION = SENSOR_ATTR_PRIV_START,
+
+	/** Cached INA237/228 alert register from the last triggered fetch.
+	 * val1 contains the raw diagnostic bits, val2 is zero. Reading this
+	 * attribute returns the last fetch error, if any, instead of stale data.
+	 */
+	SENSOR_ATTR_INA2XX_DIAGNOSTICS,
 };
 
 #ifdef __cplusplus

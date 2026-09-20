@@ -226,6 +226,7 @@ static DEVICE_API(sensor, ina230_driver_api) = {
 		   (DT_INST_PROP_OR(inst, high_precision, 0) << 1))
 
 #define INA230_DRIVER_INIT(inst)                                                                   \
+	INA2XX_DT_VALIDATE_FETCH_CHANNELS(inst, INA230_FETCH_SUPPORTED); \
 	static struct ina230_data ina230_data_##inst;                                              \
 	static const struct ina230_config ina230_config_##inst = {                                 \
 		.common =                                                                          \
@@ -238,6 +239,7 @@ static DEVICE_API(sensor, ina230_driver_api) = {
 				.config_reg = &ina230_config,                                      \
 				.adc_config_reg = NULL,                                            \
 				.cal_reg = &ina230_cal,                                            \
+			.fetch_channels = INA2XX_DT_FETCH_CHANNELS(inst, INA230_FETCH_SUPPORTED), \
 				.channels = &ina230_channels,                                      \
 			},                                                                         \
 		.uv_lsb = INA230_BUS_VOLTAGE_UV_LSB,                                               \
@@ -249,6 +251,7 @@ static DEVICE_API(sensor, ina230_driver_api) = {
 				     CONFIG_SENSOR_INIT_PRIORITY, &ina230_driver_api);
 
 #define INA232_DRIVER_INIT(inst)                                                                   \
+	INA2XX_DT_VALIDATE_FETCH_CHANNELS(inst, INA230_FETCH_SUPPORTED); \
 	static struct ina230_data ina232_data_##inst;                                              \
 	static const struct ina230_config ina232_config_##inst = {                                 \
 		.common =                                                                          \
@@ -261,6 +264,7 @@ static DEVICE_API(sensor, ina230_driver_api) = {
 				.config_reg = &ina230_config,                                      \
 				.adc_config_reg = NULL,                                            \
 				.cal_reg = &ina230_cal,                                            \
+			.fetch_channels = INA2XX_DT_FETCH_CHANNELS(inst, INA230_FETCH_SUPPORTED), \
 				.channels = &ina232_channels,                                      \
 			},                                                                         \
 		.uv_lsb = INA232_BUS_VOLTAGE_UV_LSB,                                               \
@@ -272,6 +276,7 @@ static DEVICE_API(sensor, ina230_driver_api) = {
 				     CONFIG_SENSOR_INIT_PRIORITY, &ina230_driver_api);
 
 #define INA236_DRIVER_INIT(inst)                                                                   \
+	INA2XX_DT_VALIDATE_FETCH_CHANNELS(inst, INA230_FETCH_SUPPORTED); \
 	static struct ina230_data ina236_data_##inst;                                              \
 	static const struct ina230_config ina236_config_##inst = {                                 \
 		.common =                                                                          \
@@ -284,6 +289,7 @@ static DEVICE_API(sensor, ina230_driver_api) = {
 				.config_reg = &ina230_config,                                      \
 				.adc_config_reg = NULL,                                            \
 				.cal_reg = &ina230_cal,                                            \
+			.fetch_channels = INA2XX_DT_FETCH_CHANNELS(inst, INA230_FETCH_SUPPORTED), \
 				.channels = &ina236_channels,                                      \
 			},                                                                         \
 		.uv_lsb = INA236_BUS_VOLTAGE_UV_LSB,                                               \

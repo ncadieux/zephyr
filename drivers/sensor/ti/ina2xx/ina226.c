@@ -63,6 +63,7 @@ static DEVICE_API(sensor, ina226_driver_api) = {
 #define INA226_DT_CAL(inst) DIV_ROUND_CLOSEST(5120000000ULL, INA226_DT_CAL_DENOMINATOR(inst))
 
 #define INA226_DRIVER_INIT(inst)                                  \
+	INA2XX_DT_VALIDATE_FETCH_CHANNELS(inst, INA226_FETCH_SUPPORTED); \
 	static struct ina2xx_data ina226_data_##inst;                 \
 	static const struct ina2xx_config ina226_config_##inst = {    \
 		.bus = I2C_DT_SPEC_INST_GET(inst),                        \
@@ -73,6 +74,7 @@ static DEVICE_API(sensor, ina226_driver_api) = {
 		.config_reg = &ina226_config,                             \
 		.adc_config_reg = NULL,                                   \
 		.cal_reg = &ina226_cal,                                   \
+		.fetch_channels = INA2XX_DT_FETCH_CHANNELS(inst, INA226_FETCH_SUPPORTED), \
 		.channels = &ina226_channels,                             \
 	};                                                            \
 	SENSOR_DEVICE_DT_INST_DEFINE(inst,                            \
