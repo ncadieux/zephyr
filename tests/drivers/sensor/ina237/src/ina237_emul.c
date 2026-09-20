@@ -11,12 +11,15 @@
 #include <zephyr/drivers/emul.h>
 #include <zephyr/drivers/i2c_emul.h>
 #include <zephyr/drivers/i2c.h>
+#include <zephyr/drivers/gpio/gpio_emul.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/byteorder.h>
 #include <ina237.h>
 #include <ina237_emul.h>
 
 LOG_MODULE_REGISTER(INA237_EMUL, CONFIG_SENSOR_LOG_LEVEL);
+
+#define INA237_EMUL_CONVERSION_READY BIT(1)
 
 /* Register ID, size, and value table */
 struct ina237_reg {
@@ -28,10 +31,14 @@ struct ina237_reg {
 /* Emulator configuration passed into driver instance */
 struct ina237_emul_cfg {
 	uint16_t addr;
+	struct gpio_dt_spec alert;
 };
 
 struct ina237_emul_data {
 	struct ina237_reg ina237_regs[INA237_REGISTER_COUNT];
+	unsigned int reads[INA237_REGISTER_COUNT];
+	int fail_reg;
+	bool retained_alert;
 };
 
 static struct ina237_reg *get_register(struct ina237_emul_data *data, int reg)
@@ -68,6 +75,32 @@ int ina237_mock_get_register(void *data_ptr, int reg, uint32_t *value_ptr)
 	return 0;
 }
 
+/** @brief Reset transaction observations without changing emulated register values. */
+void ina237_mock_reset_reads(void *data_ptr)
+{
+	struct ina237_emul_data *data = data_ptr;
+
+	memset(data->reads, 0, sizeof(data->reads));
+	data->fail_reg = -1;
+}
+
+/** @brief Return attempted reads of a register, including injected failures. */
+int ina237_mock_read_count(void *data_ptr, int reg)
+{
+	struct ina237_emul_data *data = data_ptr;
+	struct ina237_reg *entry = get_register(data, reg);
+
+	return entry == NULL ? -EINVAL : data->reads[entry - data->ina237_regs];
+}
+
+/** @brief Fail reads of one register; a negative address disables the fault. */
+void ina237_mock_fail_read(void *data_ptr, int reg)
+{
+	struct ina237_emul_data *data = data_ptr;
+
+	data->fail_reg = reg;
+}
+
 static int ina237_emul_transfer_i2c(const struct emul *target, struct i2c_msg msgs[], int num_msgs,
 				    int addr)
 {
@@ -101,7 +134,11 @@ static int ina237_emul_transfer_i2c(const struct emul *target, struct i2c_msg ms
 			LOG_ERR("Invalid register: %02x", reg);
 			return -EIO;
 		}
+		/* Configuration writes do not release a retained ALERT pin latch. */
 		reg_ptr->value = val;
+		if (reg == INA237_REG_ALERT && data->retained_alert) {
+			reg_ptr->value |= INA237_EMUL_CONVERSION_READY;
+		}
 		LOG_DBG("Write reg %02x: %04x", reg, val);
 	} else {
 		/* Read 2 or 3 bytes */
@@ -118,6 +155,11 @@ static int ina237_emul_transfer_i2c(const struct emul *target, struct i2c_msg ms
 			return -EIO;
 		}
 
+		data->reads[reg_ptr - data->ina237_regs]++;
+		if (reg == data->fail_reg) {
+			return -EIO;
+		}
+
 		if (msgs[1].len == 2) {
 			sys_put_be16(reg_ptr->value, msgs[1].buf);
 			LOG_DBG("Read16 reg %02x: %04x", reg, reg_ptr->value);
@@ -128,6 +170,13 @@ static int ina237_emul_transfer_i2c(const struct emul *target, struct i2c_msg ms
 			LOG_ERR("Invalid read length: %d", msgs[1].len);
 			return -EIO;
 		}
+		if (reg == INA237_REG_ALERT && data->retained_alert) {
+			const struct ina237_emul_cfg *cfg = target->cfg;
+
+			data->retained_alert = false;
+			reg_ptr->value &= ~INA237_EMUL_CONVERSION_READY;
+			return gpio_emul_input_set(cfg->alert.port, cfg->alert.pin, 1);
+		}
 	}
 
 	return 0;
@@ -135,9 +184,20 @@ static int ina237_emul_transfer_i2c(const struct emul *target, struct i2c_msg ms
 
 static int ina237_emul_init(const struct emul *target, const struct device *parent)
 {
-	ARG_UNUSED(target);
 	ARG_UNUSED(parent);
+	const struct ina237_emul_cfg *cfg = target->cfg;
+	struct ina237_emul_data *data = target->data;
 
+	if (cfg->alert.port != NULL) {
+		/* Start with ALERT already low, as after an MCU-only reset. */
+		int ret = gpio_pin_configure_dt(&cfg->alert, GPIO_INPUT);
+
+		if (ret != 0) {
+			return ret;
+		}
+		data->retained_alert = true;
+		return gpio_emul_input_set(cfg->alert.port, cfg->alert.pin, 0);
+	}
 	return 0;
 }
 
@@ -147,9 +207,11 @@ static const struct i2c_emul_api ina237_emul_api_i2c = {
 
 #define INA237_EMUL(n)									\
 	static const struct ina237_emul_cfg ina237_emul_cfg_##n = {			\
+		.alert = GPIO_DT_SPEC_INST_GET_OR(n, alert_gpios, {0}),		\
 		.addr = DT_INST_REG_ADDR(n)						\
 	};										\
 	static struct ina237_emul_data ina237_emul_data_##n = {				\
+		.fail_reg = -1, \
 		.ina237_regs = {							\
 			{INA237_REG_CONFIG, 2, 0},					\
 			{INA237_REG_ADC_CONFIG, 2, 0xFB68},				\

@@ -15,3 +15,20 @@
 		status = "okay";
 	};
 };
+
+&i2c0 {
+	ina228_selected: ina228@41 {
+		compatible = "ti,ina228";
+		reg = <0x41>;
+		rshunt-micro-ohms = <16200>;
+		current-lsb-microamps = <19>;
+		fetch-channels = "bus-voltage", "shunt-voltage";
+	};
+	ina228_energy: ina228@42 {
+		compatible = "ti,ina228";
+		reg = <0x42>;
+		rshunt-micro-ohms = <16200>;
+		current-lsb-microamps = <19>;
+		fetch-channels = "energy";
+	};
+};

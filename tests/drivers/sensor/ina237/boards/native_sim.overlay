@@ -46,3 +46,30 @@
 		status = "okay";
 	};
 };
+
+&i2c0 {
+	ina237_selected: ina237@44 {
+		compatible = "ti,ina237";
+		reg = <0x44>;
+		rshunt-micro-ohms = <400>;
+		current-lsb-microamps = <123>;
+		fetch-channels = "bus-voltage", "shunt-voltage";
+	};
+	ina237_temperature: ina237@45 {
+		compatible = "ti,ina237";
+		reg = <0x45>;
+		rshunt-micro-ohms = <400>;
+		current-lsb-microamps = <123>;
+		fetch-channels = "die-temperature";
+	};
+	ina237_triggered: ina237@46 {
+		compatible = "ti,ina237";
+		reg = <0x46>;
+		rshunt-micro-ohms = <400>;
+		current-lsb-microamps = <123>;
+		fetch-channels = "bus-voltage", "shunt-voltage";
+		adc-mode = "Bus and Shunt Voltage single shot";
+		alert-gpios = <&gpio0 7 GPIO_ACTIVE_LOW>;
+		alert-config = <0xc000>;
+	};
+};

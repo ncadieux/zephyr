@@ -302,3 +302,35 @@ ZTEST_F(ina228, test_invalid_channel)
 
 	zassert_not_ok(sensor_channel_get(fixture->dev_basic, SENSOR_CHAN_ALTITUDE, &sensor_val));
 }
+
+/** @brief ALL must not reset accumulation when energy/charge were excluded. */
+ZTEST(ina228_fetch_selection, test_excluded_accumulators)
+{
+	const struct device *dev = DEVICE_DT_GET(DT_NODELABEL(ina228_selected));
+	const struct emul *emul = EMUL_DT_GET(DT_NODELABEL(ina228_selected));
+	uint16_t config;
+
+	ina228_emul_set_reg_16(emul, INA237_REG_CONFIG, 0);
+	zassert_ok(sensor_sample_fetch(dev));
+	ina228_emul_get_reg_16(emul, INA237_REG_CONFIG, &config);
+	zassert_equal(config, 0);
+
+	/* Explicitly fetching energy still requests the existing accumulator reset. */
+	zassert_ok(sensor_sample_fetch_chan(dev, (enum sensor_channel)SENSOR_CHAN_INA2XX_ENERGY));
+	ina228_emul_get_reg_16(emul, INA237_REG_CONFIG, &config);
+	zassert_equal(config, BIT(14));
+}
+
+/** @brief Selecting energy for ALL retains the existing accumulator reset behavior. */
+ZTEST(ina228_fetch_selection, test_included_accumulators)
+{
+	const struct device *dev = DEVICE_DT_GET(DT_NODELABEL(ina228_energy));
+	const struct emul *emul = EMUL_DT_GET(DT_NODELABEL(ina228_energy));
+	uint16_t config;
+
+	ina228_emul_set_reg_16(emul, INA237_REG_CONFIG, 0);
+	zassert_ok(sensor_sample_fetch(dev));
+	ina228_emul_get_reg_16(emul, INA237_REG_CONFIG, &config);
+	zassert_equal(config, BIT(14));
+}
+ZTEST_SUITE(ina228_fetch_selection, NULL, NULL, NULL, NULL, NULL);

@@ -6,6 +6,7 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/emul.h>
+#include <zephyr/drivers/gpio/gpio_emul.h>
 #include <zephyr/drivers/i2c_emul.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/dt-bindings/sensor/ina237.h>
@@ -267,4 +268,173 @@ static struct ina237_fixture fixtures[] = {
 	ZTEST(ina237_##inst, test_vshunt) { test_vshunt(&fixtures[inst]); } \
 	ZTEST_SUITE(ina237_##inst, NULL, NULL, NULL, NULL, NULL);
 
-DT_INST_FOREACH_STATUS_OKAY(INA237_TESTS)
+/* The additional selection/trigger nodes have dedicated fetch tests. */
+#define INA237_DEFAULT_TESTS(inst) \
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, fetch_channels), (), (INA237_TESTS(inst)))
+DT_INST_FOREACH_STATUS_OKAY(INA237_DEFAULT_TESTS)
+
+static const struct device *const selected = DEVICE_DT_GET(DT_NODELABEL(ina237_selected));
+static const struct emul *const selected_emul = EMUL_DT_GET(DT_NODELABEL(ina237_selected));
+static const uint8_t data_registers[] = {
+	INA237_REG_BUS_VOLT, INA237_REG_SHUNT_VOLT, INA237_REG_CURRENT,
+	INA237_REG_POWER,    INA237_REG_DIETEMP,
+};
+static const struct gpio_dt_spec alert =
+	GPIO_DT_SPEC_GET(DT_NODELABEL(ina237_triggered), alert_gpios);
+static K_SEM_DEFINE(completed, 0, 1);
+static const struct sensor_trigger ready = {
+	.type = SENSOR_TRIG_DATA_READY,
+	.chan = SENSOR_CHAN_ALL,
+};
+
+/** @brief Wake the test only after the driver's triggered register reads finish. */
+static void conversion_ready(const struct device *dev, const struct sensor_trigger *trigger)
+{
+	ARG_UNUSED(dev);
+	ARG_UNUSED(trigger);
+	k_sem_give(&completed);
+}
+
+/** @brief Assert the exact set of register reads, including absence of unused reads. */
+static void check_reads(const struct emul *emul, uint8_t first, uint8_t second)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(data_registers); i++) {
+		uint8_t reg = data_registers[i];
+		zassert_equal(ina237_mock_read_count(emul->data, reg),
+			      reg == first || reg == second, "Unexpected reads of register %x",
+			      reg);
+	}
+}
+
+/** @brief An omitted selection preserves all five INA237 register reads. */
+ZTEST(ina237_fetch, test_default_all)
+{
+	const struct device *dev = DEVICE_DT_GET(DT_NODELABEL(ina237_default_test));
+	const struct emul *emul = EMUL_DT_GET(DT_NODELABEL(ina237_default_test));
+
+	ina237_mock_reset_reads(emul->data);
+	zassert_ok(sensor_sample_fetch(dev));
+	for (size_t i = 0; i < ARRAY_SIZE(data_registers); i++) {
+		zassert_equal(ina237_mock_read_count(emul->data, data_registers[i]), 1);
+	}
+}
+
+/** @brief A selected pair fetches only those registers and leaves ADC configuration alone. */
+ZTEST(ina237_fetch, test_bus_shunt_selection)
+{
+	uint32_t adc_before, adc_after;
+
+	ina237_mock_reset_reads(selected_emul->data);
+	zassert_ok(
+		ina237_mock_get_register(selected_emul->data, INA237_REG_ADC_CONFIG, &adc_before));
+	zassert_ok(sensor_sample_fetch(selected));
+	check_reads(selected_emul, INA237_REG_BUS_VOLT, INA237_REG_SHUNT_VOLT);
+	zassert_ok(
+		ina237_mock_get_register(selected_emul->data, INA237_REG_ADC_CONFIG, &adc_after));
+	zassert_equal(adc_before, adc_after);
+}
+
+/** @brief Different devices can independently select a different channel subset. */
+ZTEST(ina237_fetch, test_per_device_selection)
+{
+	const struct device *dev = DEVICE_DT_GET(DT_NODELABEL(ina237_temperature));
+	const struct emul *emul = EMUL_DT_GET(DT_NODELABEL(ina237_temperature));
+
+	ina237_mock_reset_reads(emul->data);
+	ina237_mock_reset_reads(selected_emul->data);
+	zassert_ok(sensor_sample_fetch(dev));
+	check_reads(emul, INA237_REG_DIETEMP, INA237_REG_DIETEMP);
+	zassert_ok(sensor_sample_fetch(selected));
+	check_reads(selected_emul, INA237_REG_BUS_VOLT, INA237_REG_SHUNT_VOLT);
+}
+
+/** @brief An explicit fetch of an unlisted channel remains supported. */
+ZTEST(ina237_fetch, test_explicit_channel)
+{
+	ina237_mock_reset_reads(selected_emul->data);
+	zassert_ok(sensor_sample_fetch_chan(selected, SENSOR_CHAN_CURRENT));
+	check_reads(selected_emul, INA237_REG_CURRENT, INA237_REG_CURRENT);
+}
+
+/** @brief A selected-register failure is returned and stops later reads. */
+ZTEST(ina237_fetch, test_selected_error)
+{
+	ina237_mock_reset_reads(selected_emul->data);
+	ina237_mock_fail_read(selected_emul->data, INA237_REG_BUS_VOLT);
+	zassert_equal(sensor_sample_fetch(selected), -EIO);
+	check_reads(selected_emul, INA237_REG_BUS_VOLT, INA237_REG_BUS_VOLT);
+	ina237_mock_reset_reads(selected_emul->data);
+}
+
+/** @brief An unselected-register failure cannot fail the selected fetch. */
+ZTEST(ina237_fetch, test_unselected_error)
+{
+	ina237_mock_reset_reads(selected_emul->data);
+	ina237_mock_fail_read(selected_emul->data, INA237_REG_CURRENT);
+	zassert_ok(sensor_sample_fetch(selected));
+	check_reads(selected_emul, INA237_REG_BUS_VOLT, INA237_REG_SHUNT_VOLT);
+	ina237_mock_reset_reads(selected_emul->data);
+}
+
+/** @brief Trigger completion honors the same selection as continuous-mode fetching. */
+ZTEST(ina237_fetch, test_triggered_selection)
+{
+	const struct device *dev = DEVICE_DT_GET(DT_NODELABEL(ina237_triggered));
+	const struct emul *emul = EMUL_DT_GET(DT_NODELABEL(ina237_triggered));
+
+	zassert_true(device_is_ready(dev));
+	zassert_ok(gpio_emul_input_set(alert.port, alert.pin, 1));
+	zassert_ok(sensor_trigger_set(dev, &ready, conversion_ready));
+	ina237_mock_reset_reads(emul->data);
+	zassert_ok(sensor_sample_fetch(dev));
+	zassert_ok(ina237_mock_set_register(emul->data, INA237_REG_ALERT, BIT(1) | BIT(0)));
+	zassert_ok(gpio_emul_input_set(alert.port, alert.pin, 0));
+	zassert_ok(k_sem_take(&completed, K_SECONDS(1)));
+	check_reads(emul, INA237_REG_BUS_VOLT, INA237_REG_SHUNT_VOLT);
+	zassert_equal(ina237_mock_read_count(emul->data, INA237_REG_ALERT), 1);
+	zassert_ok(sensor_trigger_set(dev, &ready, NULL));
+}
+/** @brief Registration must service an alert asserted before falling-edge IRQ delivery. */
+ZTEST(ina237_fetch, test_subscribe_with_alert_already_active)
+{
+	const struct device *dev = DEVICE_DT_GET(DT_NODELABEL(ina237_triggered));
+	const struct emul *emul = EMUL_DT_GET(DT_NODELABEL(ina237_triggered));
+
+	zassert_ok(sensor_trigger_set(dev, &ready, NULL));
+	zassert_ok(gpio_pin_interrupt_configure_dt(&alert, GPIO_INT_DISABLE));
+	zassert_ok(gpio_emul_input_set(alert.port, alert.pin, 1));
+	zassert_ok(sensor_sample_fetch(dev));
+	zassert_ok(ina237_mock_set_register(emul->data, INA237_REG_ALERT, BIT(1) | BIT(0)));
+	zassert_ok(gpio_emul_input_set(alert.port, alert.pin, 0));
+	zassert_ok(gpio_pin_interrupt_configure_dt(&alert, GPIO_INT_EDGE_FALLING));
+	ina237_mock_reset_reads(emul->data);
+	k_sem_reset(&completed);
+	zassert_ok(sensor_trigger_set(dev, &ready, conversion_ready));
+	zassert_ok(k_sem_take(&completed, K_SECONDS(1)));
+	zassert_equal(ina237_mock_read_count(emul->data, INA237_REG_ALERT), 1);
+	check_reads(emul, INA237_REG_BUS_VOLT, INA237_REG_SHUNT_VOLT);
+	zassert_ok(sensor_trigger_set(dev, &ready, NULL));
+	zassert_ok(gpio_emul_input_set(alert.port, alert.pin, 1));
+}
+
+static int startup_alert_level;
+static int startup_alert_reads;
+
+/** @brief Save initialization observations before fetch tests modify the emulator. */
+static void *fetch_setup(void)
+{
+	const struct emul *emul = EMUL_DT_GET(DT_NODELABEL(ina237_triggered));
+
+	startup_alert_level = gpio_pin_get_raw(alert.port, alert.pin);
+	startup_alert_reads = ina237_mock_read_count(emul->data, INA237_REG_ALERT);
+	return NULL;
+}
+
+/** @brief A retained low ALERT must be released before the first application fetch. */
+ZTEST(ina237_fetch, test_retained_alert_at_startup)
+{
+	zassert_true(device_is_ready(DEVICE_DT_GET(DT_NODELABEL(ina237_triggered))));
+	zassert_equal(startup_alert_level, 1, "Initialization left ALERT latched low");
+	zassert_equal(startup_alert_reads, 1, "Expected one startup latch-clearing read");
+}
+ZTEST_SUITE(ina237_fetch, NULL, fetch_setup, NULL, NULL, NULL);
