@@ -51,7 +51,11 @@ int source_ctrl_set(const struct device *dev, enum source_t v);
  *
  * @param vbus VBUS measurement device
  * @param v Target VBUS level
+ * @retval 1 VBUS is within the target range
+ * @retval 0 VBUS is outside the target range
+ * @retval -EINVAL Invalid target voltage
+ * @return Negative error code on measurement failure
  */
-bool source_is_ps_ready(const struct device *vbus, enum source_t v);
+int source_is_ps_ready(const struct device *vbus, enum source_t v);
 
 #endif /* ZEPHYR_SAMPLES_SUBSYS_USBC_COMMON_POWER_CTRL_H */

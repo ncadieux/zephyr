@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+tests:
+  samples.usbc.source_transition:
+    tags:
+      - usb
+    platform_allow:
+      - native_sim
+      - qemu_cortex_m3
+    integration_platforms:
+      - qemu_cortex_m3

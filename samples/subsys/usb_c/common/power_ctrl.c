@@ -80,12 +80,16 @@ int source_ctrl_set(const struct device *dev, enum source_t v)
 	return pwm_set_pulse_dt(&cfg->pwm_ctl, pwmv);
 }
 
-bool source_is_ps_ready(const struct device *vbus, enum source_t v)
+int source_is_ps_ready(const struct device *vbus, enum source_t v)
 {
 	int vbus_mv;
-	int target_mv = 0;
+	int target_mv;
+	int ret;
 
-	usbc_vbus_measure(vbus, &vbus_mv);
+	ret = usbc_vbus_measure(vbus, &vbus_mv);
+	if (ret != 0) {
+		return ret;
+	}
 
 	switch (v) {
 	case SOURCE_0V:
@@ -99,6 +103,8 @@ bool source_is_ps_ready(const struct device *vbus, enum source_t v)
 	case SOURCE_15V:
 		target_mv = 15000;
 		break;
+	default:
+		return -EINVAL;
 	}
 
 	return (vbus_mv >= PD_V_SRC_NEW_MIN_MV(target_mv)) &&

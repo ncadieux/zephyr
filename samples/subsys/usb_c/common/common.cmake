@@ -4,5 +4,8 @@
 # Common USB-C sample code
 # Include this file from sample CMakeLists.txt to add shared power control driver
 
-target_sources(app PRIVATE ${CMAKE_CURRENT_LIST_DIR}/power_ctrl.c)
+target_sources(app PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}/power_ctrl.c
+  ${CMAKE_CURRENT_LIST_DIR}/source_transition.c
+)
 target_include_directories(app PRIVATE ${CMAKE_CURRENT_LIST_DIR})

@@ -15,6 +15,7 @@
 LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
 #include <power_ctrl.h>
+#include <source_transition.h>
 
 #define USBC_PORT0_NODE         DT_ALIAS(usbc_port0)
 #define USBC_PORT0_PWRCTRL_NODE DT_ALIAS(usbc_port0_pwrctrl)
@@ -28,9 +29,6 @@ BUILD_ASSERT(DT_ENUM_IDX(USBC_PORT0_NODE, power_role) == TC_ROLE_CAP_DRP,
 
 /* Flag bits for power supply state management */
 #define PS_SOURCE_REQUEST_BIT          0 /* Source: Display sink request */
-#define PS_SOURCE_TRAN_START_BIT       1 /* Source: Start voltage transition */
-#define PS_SOURCE_TRAN_IN_PROGRESS_BIT 2 /* Source: Voltage transition in progress */
-#define PS_SOURCE_READY_BIT            3 /* Source: Voltage transition complete */
 #define PS_SINK_READY_BIT              4 /* Sink: Source has finished transition */
 
 /* usbc.rst port data object start */
@@ -62,6 +60,8 @@ static struct port0_data_t {
 	enum tc_cc_polarity vconn_pol;
 	/** VBUS measurement device */
 	const struct device *vbus;
+	/** Serialized source transition */
+	struct source_transition transition;
 	/** Atomic ps_flags for power supply state management */
 	atomic_t ps_flags;
 	/** Source Capabilities of the port partner */
@@ -227,9 +227,7 @@ int port0_policy_cb_src_en(const struct device *dev, bool en)
 {
 	struct port0_data_t *dpm_data = usbc_get_dpm_data(dev);
 
-	dpm_data->obj_pos = en ? SOURCE_5V : SOURCE_0V;
-	atomic_clear_bit(&dpm_data->ps_flags, PS_SOURCE_READY_BIT);
-	atomic_set_bit(&dpm_data->ps_flags, PS_SOURCE_TRAN_START_BIT);
+	source_transition_request(&dpm_data->transition, en ? SOURCE_5V : SOURCE_0V);
 
 	return 0;
 }
@@ -305,7 +303,7 @@ static enum usbc_snk_req_reply_t port0_policy_cb_check_sink_request(const struct
 	 * Clear PS ready. This will be set to true after PS is ready after
 	 * it transitions to the new level.
 	 */
-	atomic_clear_bit(&dpm_data->ps_flags, PS_SOURCE_READY_BIT);
+	source_transition_cancel(&dpm_data->transition);
 
 	return SNK_REQUEST_VALID;
 }
@@ -318,7 +316,7 @@ static bool port0_policy_cb_is_ps_ready(const struct device *dev)
 {
 	struct port0_data_t *dpm_data = usbc_get_dpm_data(dev);
 
-	return atomic_test_bit(&dpm_data->ps_flags, PS_SOURCE_READY_BIT);
+	return source_transition_is_ready(&dpm_data->transition);
 }
 
 /**
@@ -416,7 +414,7 @@ static void port0_notify(const struct device *dev, const enum usbc_policy_notify
 		/* Handle based on current power role */
 		if (dpm_data->current_power_role == TC_ROLE_SOURCE) {
 			/* Source: Start power supply transition */
-			atomic_set_bit(&dpm_data->ps_flags, PS_SOURCE_TRAN_START_BIT);
+			source_transition_request(&dpm_data->transition, dpm_data->obj_pos);
 		} else {
 			/* Sink: Source has finished transition */
 			atomic_set_bit(&dpm_data->ps_flags, PS_SINK_READY_BIT);
@@ -456,7 +454,7 @@ static void port0_notify(const struct device *dev, const enum usbc_policy_notify
 		/* Power off VCONN */
 		vconn_ctrl_set(dpm_data->pwrctrl, VCONN_OFF);
 		/* Transition PS to Default level */
-		source_ctrl_set(dpm_data->pwrctrl, SOURCE_5V);
+		source_transition_request(&dpm_data->transition, SOURCE_5V);
 		break;
 	case SENDER_RESPONSE_TIMEOUT:
 		break;
@@ -493,10 +491,14 @@ bool port0_policy_check(const struct device *dev, const enum usbc_policy_check_t
 		 *	2: Return TRUE when Power Supply is at default level
 		 */
 
+		if (!source_transition_is_ready(&dpm_data->transition)) {
+			return false;
+		}
+
 		/* Power on VCONN */
 		vconn_ctrl_set(dpm_data->pwrctrl, dpm_data->vconn_pol);
 
-		/* PS should be at default level after receiving a Hard Reset */
+		/* The default-level transition has completed. */
 		return true;
 	default:
 		/* Reject all other policy checks */
@@ -529,6 +531,8 @@ int main(void)
 		LOG_ERR("PORT0 vbus not ready");
 		return 0;
 	}
+
+	source_transition_init(&port0_data.transition, port0_data.pwrctrl, port0_data.vbus);
 
 	/* usbc.rst register start */
 	/* Register USB-C Callbacks */
@@ -574,18 +578,13 @@ int main(void)
 	/* usbc.rst usbc end */
 
 	while (1) {
-		/* Source: Start voltage transition */
-		if (atomic_test_and_clear_bit(&port0_data.ps_flags, PS_SOURCE_TRAN_START_BIT)) {
-			source_ctrl_set(port0_data.pwrctrl, port0_data.obj_pos);
-			atomic_set_bit(&port0_data.ps_flags, PS_SOURCE_TRAN_IN_PROGRESS_BIT);
-		}
+		int ret = source_transition_poll(&port0_data.transition);
 
-		/* Source: Check if voltage transition is complete */
-		if (atomic_test_bit(&port0_data.ps_flags, PS_SOURCE_TRAN_IN_PROGRESS_BIT)) {
-			if (source_is_ps_ready(port0_data.vbus, port0_data.obj_pos)) {
-				atomic_clear_bit(&port0_data.ps_flags,
-						 PS_SOURCE_TRAN_IN_PROGRESS_BIT);
-				atomic_set_bit(&port0_data.ps_flags, PS_SOURCE_READY_BIT);
+		if (ret != 0) {
+			LOG_ERR("Source transition failed: %d", ret);
+			ret = usbc_request(usbc_port0, REQUEST_TC_ERROR_RECOVERY);
+			if (ret != 0) {
+				LOG_ERR("Failed to request error recovery: %d", ret);
 			}
 		}
 
